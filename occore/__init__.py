@@ -60,6 +60,24 @@ from .devops import (
     DEFAULT_HEALTH_CHECK_CONFIG,
     DEFAULT_WATCHDOG_CONFIG,
 )
+from .pnl import (
+    ProfitCalculator,
+    PerformanceAnalyzer,
+    ReportGenerator,
+    TradeRecord,
+    DailyPnL,
+    PerformanceMetrics,
+    PnLType,
+    TradeStatus,
+    PositionSide,
+    get_calculator,
+    get_analyzer,
+    get_report_generator,
+    init_calculator,
+    init_analyzer,
+    init_report_generator,
+    DEFAULT_PNL_CONFIG,
+)
 
 __all__ = [
     # 제2부서 정보검증분석센터
@@ -108,6 +126,23 @@ __all__ = [
     "init_watchdog",
     "DEFAULT_HEALTH_CHECK_CONFIG",
     "DEFAULT_WATCHDOG_CONFIG",
+    # 제5부서 일일 성과분석팀
+    "ProfitCalculator",
+    "PerformanceAnalyzer",
+    "ReportGenerator",
+    "TradeRecord",
+    "DailyPnL",
+    "PerformanceMetrics",
+    "PnLType",
+    "TradeStatus",
+    "PositionSide",
+    "get_calculator",
+    "get_analyzer",
+    "get_report_generator",
+    "init_calculator",
+    "init_analyzer",
+    "init_report_generator",
+    "DEFAULT_PNL_CONFIG",
     # 외부 탐색팀 데이터 소스
     "OpenBBAdapter",
     "NewsCollector",
