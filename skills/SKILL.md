@@ -15,7 +15,7 @@ description: OZ_A2M (AI Agent to Market) 프로젝트 개발 가이드. 7부서 
 
 ---
 
-## 7부서 아키텍처
+## 아키텍처
 
 ### 제1부서: 관제탑센터 (Control Tower Center)
 **경로**: `occore/control_tower/`
