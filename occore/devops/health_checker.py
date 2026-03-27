@@ -1,4 +1,7 @@
-"""헬스 체커 - 시스템 및 서비스 상태 모니터링"""
+"""헬스 체커 - 시스템 및 서비스 상태 모니터링
+
+Netdata 실시간 모니터링 통합 지원
+"""
 import logging
 import threading
 import asyncio
@@ -13,11 +16,20 @@ logger = logging.getLogger(__name__)
 
 
 class HealthChecker:
-    """시스템 헬스 체커"""
+    """시스템 헬스 체커 (psutil + Netdata 하이브리드)"""
 
     DEFAULT_CONFIG = DEFAULT_HEALTH_CHECK_CONFIG
 
-    def __init__(self, config: Optional[Dict[str, Any]] = None):
+    def __init__(self, config: Optional[Dict[str, Any]] = None,
+                 use_netdata: bool = False, netdata_host: str = "localhost:19999"):
+        """
+        헬스 체커 초기화
+
+        Args:
+            config: 설정 딕셔너리
+            use_netdata: Netdata 사용 여부
+            netdata_host: Netdata 호스트 (예: localhost:19999)
+        """
         self.config = {**self.DEFAULT_CONFIG, **(config or {})}
         self._lock = threading.RLock()
         self._history: List[HealthCheckResult] = []
@@ -25,8 +37,41 @@ class HealthChecker:
         self._service_checks = DEFAULT_SERVICE_CHECKS.copy()
         self._circuit_failures: Dict[str, List[datetime]] = {}
 
+        # Netdata 설정
+        self._use_netdata = use_netdata
+        self._netdata = None
+        if use_netdata:
+            self._init_netdata(netdata_host)
+
+    def _init_netdata(self, host: str):
+        """Netdata 어댑터 초기화"""
+        try:
+            from .netdata_adapter import NetdataAdapter
+            self._netdata = NetdataAdapter(host=host)
+            if self._netdata.connect():
+                logger.info("Netdata monitoring enabled")
+            else:
+                logger.warning("Netdata connection failed, falling back to psutil")
+                self._use_netdata = False
+        except ImportError:
+            logger.warning("requests package not installed. Run: pip install requests")
+            self._use_netdata = False
+        except Exception as e:
+            logger.error(f"Failed to initialize Netdata: {e}")
+            self._use_netdata = False
+
     def check_system_resources(self) -> ResourceMetrics:
-        """시스템 리소스 체크 (psutil 사용)"""
+        """
+        시스템 리소스 체크 (Netdata 우선, fallback psutil)
+        """
+        # Netdata 우선 사용
+        if self._use_netdata and self._netdata and self._netdata.is_connected():
+            try:
+                return self._netdata.get_resource_metrics()
+            except Exception as e:
+                logger.warning(f"Netdata metrics failed, using psutil: {e}")
+
+        # psutil fallback
         try:
             import psutil
             cpu = psutil.cpu_percent(interval=0.5)
@@ -196,21 +241,98 @@ class HealthChecker:
         """상태 변경 콜백 등록"""
         self._callbacks.append(callback)
 
+    # ===== Netdata 통합 메서드 =====
+
+    def is_netdata_enabled(self) -> bool:
+        """Netdata 사용 여부 확인"""
+        return self._use_netdata and self._netdata is not None and self._netdata.is_connected()
+
+    def get_netdata_metrics(self) -> Optional[Dict[str, Any]]:
+        """Netdata 실시간 메트릭 조회"""
+        if not self.is_netdata_enabled():
+            logger.warning("Netdata not enabled or not connected")
+            return None
+
+        try:
+            return self._netdata.get_system_metrics()
+        except Exception as e:
+            logger.error(f"Failed to get Netdata metrics: {e}")
+            return None
+
+    def get_netdata_alarms(self) -> List[Dict]:
+        """Netdata 알림 조회"""
+        if not self.is_netdata_enabled():
+            return []
+
+        try:
+            return self._netdata.get_active_alarms()
+        except Exception as e:
+            logger.error(f"Failed to get Netdata alarms: {e}")
+            return []
+
+    def get_netdata_trading_metrics(self) -> Optional[Dict[str, Any]]:
+        """트레이딩 관련 Netdata 메트릭"""
+        if not self.is_netdata_enabled():
+            return None
+
+        try:
+            return self._netdata.get_trading_metrics()
+        except Exception as e:
+            logger.error(f"Failed to get trading metrics: {e}")
+            return None
+
+    def check_netdata_health(self) -> tuple[HealthStatus, str]:
+        """Netdata 기반 헬스 체크"""
+        if not self.is_netdata_enabled():
+            return HealthStatus.WARNING, "Netdata not enabled"
+
+        try:
+            return self._netdata.check_health()
+        except Exception as e:
+            return HealthStatus.CRITICAL, f"Netdata health check failed: {e}"
+
 
 # 싱글톤 인스턴스
 _health_checker_instance: Optional[HealthChecker] = None
 
 
-def get_health_checker() -> HealthChecker:
-    """HealthChecker 싱글톤 인스턴스 가져오기"""
+def get_health_checker(
+    use_netdata: bool = False,
+    netdata_host: str = "localhost:19999"
+) -> HealthChecker:
+    """
+    HealthChecker 싱글톤 인스턴스 가져오기
+
+    Args:
+        use_netdata: Netdata 사용 여부
+        netdata_host: Netdata 호스트 (예: localhost:19999)
+    """
     global _health_checker_instance
     if _health_checker_instance is None:
-        _health_checker_instance = HealthChecker()
+        _health_checker_instance = HealthChecker(
+            use_netdata=use_netdata,
+            netdata_host=netdata_host
+        )
     return _health_checker_instance
 
 
-def init_health_checker(config: Optional[Dict[str, Any]] = None) -> HealthChecker:
-    """HealthChecker 초기화 (명시적)"""
+def init_health_checker(
+    config: Optional[Dict[str, Any]] = None,
+    use_netdata: bool = False,
+    netdata_host: str = "localhost:19999"
+) -> HealthChecker:
+    """
+    HealthChecker 초기화 (명시적)
+
+    Args:
+        config: 설정 딕셔너리
+        use_netdata: Netdata 사용 여부
+        netdata_host: Netdata 호스트
+    """
     global _health_checker_instance
-    _health_checker_instance = HealthChecker(config=config)
+    _health_checker_instance = HealthChecker(
+        config=config,
+        use_netdata=use_netdata,
+        netdata_host=netdata_host
+    )
     return _health_checker_instance
