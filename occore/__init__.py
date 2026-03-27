@@ -18,8 +18,43 @@ from .security import (
 from .data_sources import (
     OpenBBAdapter, NewsCollector, SentimentAnalyzer, DataRouter
 )
+from .verification import (
+    VerificationCenter,
+    SignalGenerator,
+    NoiseFilter,
+    IndicatorEngine,
+    VerificationPipeline,
+    TradingSignal,
+    SignalType,
+    SignalDirection,
+    VerificationStatus,
+    FilteredData,
+    VerificationResult,
+    IndicatorValues,
+    get_verification_center,
+    get_signal_generator,
+    get_noise_filter,
+    get_indicator_engine,
+)
 
 __all__ = [
+    # 제2부서 정보검증분석센터
+    "VerificationCenter",
+    "SignalGenerator",
+    "NoiseFilter",
+    "IndicatorEngine",
+    "VerificationPipeline",
+    "TradingSignal",
+    "SignalType",
+    "SignalDirection",
+    "VerificationStatus",
+    "FilteredData",
+    "VerificationResult",
+    "IndicatorValues",
+    "get_verification_center",
+    "get_signal_generator",
+    "get_noise_filter",
+    "get_indicator_engine",
     # 제3부서 보안팀
     "Vault",
     "AccessControl",
