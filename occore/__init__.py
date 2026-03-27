@@ -13,7 +13,8 @@ OZ_A2M 아키텍처 기반 트레이딩 시스템
 
 from .security import (
     Vault, AccessControl, PermissionLevel,
-    AuditLogger, ThreatMonitor
+    AuditLogger, ElasticsearchAuditAdapter, ThreatMonitor,
+    init_audit_logger, init_elasticsearch_adapter,
 )
 from .data_sources import (
     OpenBBAdapter, NewsCollector, SentimentAnalyzer, DataRouter
@@ -102,7 +103,10 @@ __all__ = [
     "AccessControl",
     "PermissionLevel",
     "AuditLogger",
+    "ElasticsearchAuditAdapter",
     "ThreatMonitor",
+    "init_audit_logger",
+    "init_elasticsearch_adapter",
     # 제4부서 유지보수관리센터
     "HealthChecker",
     "Watchdog",
