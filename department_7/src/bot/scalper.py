@@ -21,6 +21,7 @@ sys.path.insert(0, str(project_root))
 
 from lib.core.logger import get_logger
 from lib.messaging.mqtt_client import MQTTClient, MQTTConfig
+from lib.messaging.event_bus import EventBus, EventType, EventPriority, get_event_bus
 
 logger = get_logger(__name__)
 
@@ -135,6 +136,10 @@ class ScalpingBot:
         self.mqtt_host = mqtt_host
         self.mqtt_port = mqtt_port
 
+        # EventBus (Phase 7 인프라 연동 - Kafka + MQTT 하이브리드)
+        self.event_bus: Optional[EventBus] = None
+        self.enable_kafka = False  # Kafka 활성화 여부
+
         # 통계
         self.daily_pnl: float = 0.0
         self.total_trades: int = 0
@@ -146,8 +151,13 @@ class ScalpingBot:
 
         logger.info(f"ScalpingBot {bot_id} initialized")
 
-    async def initialize(self):
-        """봇 초기화"""
+    async def initialize(self, enable_event_bus: bool = True, enable_kafka: bool = False):
+        """봇 초기화
+
+        Args:
+            enable_event_bus: EventBus 활성화 여부 (Phase 7 인프라 연동)
+            enable_kafka: Kafka 영속화 활성화 여부 (HIGH/CRITICAL 이벤트)
+        """
         # 거래소 설정
         exchange_class = getattr(ccxt, self.exchange_id)
         config = {
@@ -161,16 +171,32 @@ class ScalpingBot:
             self.exchange.set_sandbox_mode(True)
             logger.info("Exchange set to sandbox mode")
 
-        # MQTT 연결
-        try:
-            await self.mqtt.connect()
-            await self.mqtt.subscribe("signals/scalping", self._on_mqtt_message)
-            await self.mqtt.subscribe(f"orders/{self.bot_id}/execute", self._on_mqtt_message)
-            logger.info(f"MQTT connected for bot {self.bot_id}")
-        except Exception as e:
-            logger.error(f"MQTT connection failed: {e}")
-            self.state = BotState.ERROR
-            raise RuntimeError(f"Failed to connect MQTT: {e}")
+        # EventBus 초기화 (Phase 7 인프라 연동)
+        if enable_event_bus:
+            try:
+                self.event_bus = get_event_bus(
+                    mqtt_host=self.mqtt_host,
+                    mqtt_port=self.mqtt_port,
+                    enable_kafka=enable_kafka
+                )
+                self.enable_kafka = enable_kafka
+                await self.event_bus.connect()
+                logger.info(f"EventBus connected (Kafka: {enable_kafka})")
+            except Exception as e:
+                logger.warning(f"EventBus connection failed, falling back to MQTT only: {e}")
+                self.event_bus = None
+
+        # MQTT 연결 (EventBus가 없을 때만 직접 연결)
+        if not self.event_bus:
+            try:
+                await self.mqtt.connect()
+                await self.mqtt.subscribe("signals/scalping", self._on_mqtt_message)
+                await self.mqtt.subscribe(f"orders/{self.bot_id}/execute", self._on_mqtt_message)
+                logger.info(f"MQTT connected for bot {self.bot_id}")
+            except Exception as e:
+                logger.error(f"MQTT connection failed: {e}")
+                self.state = BotState.ERROR
+                raise RuntimeError(f"Failed to connect MQTT: {e}")
 
         self.state = BotState.RUNNING
         logger.info(f"ScalpingBot {self.bot_id} initialized and running")
@@ -226,12 +252,30 @@ class ScalpingBot:
         try:
             self.state = BotState.ERROR
 
+            # 에러 상태를 Kafka에 영속화 (Phase 7 인프라)
+            if self.event_bus:
+                try:
+                    await self.event_bus.emit_bot_status(
+                        bot_id=self.bot_id,
+                        status="error",
+                        detail={"daily_pnl": self.daily_pnl, "total_trades": self.total_trades}
+                    )
+                except Exception as e:
+                    logger.error(f"Failed to emit error status: {e}")
+
             # 열린 포지션 정리
             if self.position:
                 try:
                     await self.close_position()
                 except Exception as e:
                     logger.error(f"Failed to close position during safe stop: {e}")
+
+            # EventBus 연결 해제
+            if self.event_bus:
+                try:
+                    await self.event_bus.disconnect()
+                except Exception as e:
+                    logger.error(f"Failed to disconnect EventBus during safe stop: {e}")
 
             # MQTT 연결 해제
             try:
@@ -247,9 +291,25 @@ class ScalpingBot:
         """봇 중지"""
         self.state = BotState.IDLE
 
+        # 봇 상태 이벤트 발행 (Kafka 영속화)
+        if self.event_bus:
+            try:
+                await self.event_bus.emit_bot_status(
+                    bot_id=self.bot_id,
+                    status="stopped",
+                    detail={"daily_pnl": self.daily_pnl, "total_trades": self.total_trades}
+                )
+            except Exception as e:
+                logger.warning(f"Failed to emit stop status: {e}")
+
         # 열린 포지션 정리
         if self.position:
             await self.close_position()
+
+        # EventBus 연결 해제
+        if self.event_bus:
+            await self.event_bus.disconnect()
+            logger.info("EventBus disconnected")
 
         await self.mqtt.disconnect()
         logger.info(f"ScalpingBot {self.bot_id} stopped")
@@ -491,11 +551,25 @@ class ScalpingBot:
             logger.error(f"Error updating balance: {e}")
 
     async def _publish_trade(self, trade: Trade):
-        """거래 정보 MQTT 발행"""
+        """거래 정보 발행 (EventBus - Kafka + MQTT 하이브리드)"""
         try:
-            topic = f"trades/{self.bot_id}"
-            payload = json.dumps(trade.to_dict())
-            await self.mqtt.publish(topic, payload)
+            # EventBus 사용 (Phase 7 인프라 연동)
+            if self.event_bus:
+                await self.event_bus.emit_trade(
+                    trade_id=trade.id,
+                    order_id=trade.id,  # Using trade id as order id for simplicity
+                    symbol=trade.symbol,
+                    side=trade.side,
+                    amount=trade.amount,
+                    price=trade.price,
+                    pnl=trade.pnl
+                )
+                logger.debug(f"Trade published via EventBus: {trade.id}")
+            else:
+                # Fallback to direct MQTT
+                topic = f"trades/{self.bot_id}"
+                payload = json.dumps(trade.to_dict())
+                await self.mqtt.publish(topic, payload)
         except Exception as e:
             logger.error(f"Error publishing trade: {e}")
 
