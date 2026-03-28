@@ -1,149 +1,32 @@
-# OZ_A2M - AI-Powered Multi-Agent Trading System
+# OZ_A2M
+# [Project] OZ_A2M (AI Agent to Market) Core Architecture
+**소속:** OzzyHA_company (Human + AI)
+**총괄 최고경영자(CEO):** Ozzy
+**목표:** 주식, 코인, 비표준/신흥 시장의 데이터 수집, 검증, 매매, 피드백을 100% 자동화하는 퀀트 AI 에이전트 생태계 구축.
 
-🤖 **OZ_A2M**은 7개 부서의 AI 에이전트가 협업하여 실시간 암호화폐 트레이딩을 수행하는 분산 시스템입니다.
+## 🖥️ 통합 프론트엔드: CEO 중앙 대시보드 (Presentation Layer)
+* **역할:** 아래 7개 백엔드 부서가 생산하는 모든 데이터와 로그를 시각화하고, CEO의 수동 통제(전체재시동, 시스템최적화, 긴급 킬 스위치, 손실 한도 설정)를 각 부서로 전달하는 웹 기반 GUI.
+* **아키텍처 원칙:** 모든 7개 부서 에이전트는 독립적으로 백그라운드에서 가동되며, 대시보드(프론트엔드)와는 철저히 API 또는 웹소켓으로만 데이터를 주고받는다 (Decoupled Architecture).
 
-## 🏗️ 아키텍처 개요
+## ⚙️ 파이프라인 및 부서별 핵심 지침 (Backend Departments)
 
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                         OZ_A2M System                           │
-├──────────┬──────────┬──────────┬──────────┬──────────┬──────────┤
-│   제1부서 │   제2부서 │   제3부서 │   제4부서 │   제5부서 │   제6부서 │
-│  시장분석 │  전략수립 │  리스크관리│  포트폴리오│  데이터관리│  시스템운영│
-│   (MA)   │   (ST)   │   (RM)   │   (PM)   │   (DM)   │   (SO)   │
-└────┬─────┴────┬─────┴────┬─────┴────┬─────┴────┬─────┴────┬─────┘
-     │          │          │          │          │          │
-     └──────────┴──────────┴────┬─────┴──────────┴──────────┘
-                                │
-                    ┌───────────┴───────────┐
-                    │       제7부서         │
-                    │     운영팀 (OPS)       │
-                    │   - 실제 거래 실행     │
-                    │   - Freqtrade 연동    │
-                    └───────────────────────┘
-```
+### 1. 제1부서: 관제탑센터 (Control Tower Center)
+* **목적:** 모든 정형 데이터(금융 API, 호가창)와 외부 탐색 에이전트가 물어온 비정형 데이터를 중앙으로 수집하여, 단일 통합 전황판으로 정제함. (대시보드에 실시간 데이터 수집 상태 보고)
 
-## 📁 프로젝트 구조
+### 2. 제2부서: 정보검증분석센터 (Verification & Analysis Center)
+* **목적:** 관제탑이 넘겨준 상황판(가동 활용에 필요한 데이터)을 분석하여 노이즈를 필터링하고, 각 실전 매매 에이전트가 실행할 '명확한 매매 지시서(Signal)'를 생산함.
 
-```
-OZ_A2M/
-├── department_1/          # 제1부서: 시장분석 (Market Analysis)
-├── department_2/          # 제2부서: 전략수립 (Strategy)
-├── department_3/          # 제3부서: 리스크관리 (Risk Management)
-├── department_4/          # 제4부서: 포트폴리오관리 (Portfolio)
-├── department_5/          # 제5부서: 데이터관리 (Data Management)
-├── department_6/          # 제6부서: 시스템운영 (System Operations)
-├── department_7/          # 제7부서: 운영팀 (Operations)
-├── lib/                   # 공통 라이브러리
-├── config/                # 시스템 설정
-├── tests/                 # 통합 테스트
-└── docs/                  # 문서
-```
+### 3. 제3부서: 보안팀 (Security & Gatekeeper Team)
+* **목적:** 전체 시스템에 대한 외부 해킹 방어(API, 각 종 key, 비밀번호 외부 유출 방지), 외부 접속 시도, 승인 나지 않은 접속 방어 및 보안유지 관리.
 
-## 🚀 빠른 시작
+### 4. 제4부서: 유지보수관리센터 (DevOps & Monitoring Center)
+* **목적:** 전체 AI 에이전트와 API의 물리적/소프트웨어적 상태를 실시간 감시. (대시보드의 '시스템 탭'에 서버 리소스 및 프로세스 상태 전송), 각 센터와 부서의 상태, 현황, 가동봇에 대한 오류, 이상, 업데이트 유지보수. 
 
-### 필수 요구사항
-- Python 3.11+
-- Docker & Docker Compose
-- 8GB+ RAM
+### 5. 제5부서: 일일 성과분석 대책개선팀 (Daily PnL & Strategy Team)
+* **목적:** 하루 장 마감 후 에이전트별 수익률(PnL)을 팩트 기반으로 분석 및 진단. (대시보드의 '캘린더/수익 탭'에 시각화 데이터 전송)
 
-### 설치
+### 6. 제6부서: 연구개발팀 (R&D & Evolution Team)
+* **목적:** 성과분석팀의 피드백을 기반으로 신규 시장 로직 설계 및 기존 시스템 통합 업데이트 패치 배포.
 
-```bash
-# 저장소 클론
-git clone https://github.com/OzzyHA-company/OZ_A2M.git
-cd OZ_A2M
-
-# 가상환경 설정
-python -m venv venv
-source venv/bin/activate  # Windows: venv\Scripts\activate
-
-# 패키지 설치
-pip install -e ".[all]"
-
-# 환경 변수 설정
-cp .env.example .env
-# .env 파일 편집
-
-# 서비스 시작
-docker-compose up -d
-```
-
-### 서비스 확인
-
-```bash
-# Gateway 상태 확인
-curl http://localhost:8000/health
-
-# MQTT 브로커 상태
-mosquitto_sub -h localhost -t "#" -v
-
-# Netdata 대시보드
-open http://localhost:19999
-
-# Trading UI
-open http://localhost:8080
-```
-
-## 🔧 주요 기능
-
-### 핵심 서비스
-- **MQTT Broker**: 실시간 메시징 (mosquitto)
-- **Redis**: 캐싱 및 상태 관리
-- **Elasticsearch**: 로그 및 데이터 저장
-- **Netdata**: 시스템 모니터링
-- **FastAPI Gateway**: API 게이트웨이
-- **Freqtrade**: 자동 트레이딩 엔진
-
-### 부서별 역할
-
-| 부서 | 역할 | 기술 스택 |
-|------|------|----------|
-| 제1부서 | 시장 분석 및 예측 | pandas, numpy, scikit-learn |
-| 제2부서 | 트레이딩 전략 개발 | ta-lib, freqtrade |
-| 제3부서 | 리스크 관리 및 감사 | VaR, Monte Carlo |
-| 제4부서 | 포트폴리오 최적화 | PyPortfolioOpt |
-| 제5부서 | 데이터 수집 및 관리 | Apache Kafka, InfluxDB |
-| 제6부서 | 시스템 운영 및 모니터링 | Prometheus, Grafana |
-| 제7부서 | 실제 거래 실행 | Freqtrade, CCXT |
-
-## 📡 MQTT 토픽 구조
-
-```
-oz_a2m/
-├── market/
-│   ├── price/{symbol}      # 실시간 가격
-│   ├── orderbook/{symbol}  # 오더북
-│   └── signals             # 거래 신호
-├── orders/
-│   ├── new                 # 새 주문
-│   ├── update              # 주문 업데이트
-│   └── status              # 주문 상태
-├── system/
-│   ├── health              # 시스템 상태
-│   ├── logs                # 로그
-│   └── alerts              # 알림
-└── agents/
-    ├── d1/analysis         # 제1부서 분석 결과
-    ├── d2/strategy         # 제2부서 전략
-    └── d7/execution        # 제7부서 실행 결과
-```
-
-## 🔐 보안
-
-- CSRF 보호 적용
-- API 키 암호화 저장
-- 보안 감사 로깅
-- 비밀번호 해싱 (bcrypt)
-
-## 📝 라이선스
-
-MIT License - 자세한 내용은 [LICENSE](LICENSE) 파일을 참조하세요.
-
-## 🤝 기여
-
-기여는 언제나 환영합니다! 자세한 내용은 [CONTRIBUTING.md](CONTRIBUTING.md)를 참조하세요.
-
----
-
-**Made with ❤️ by OzzyHA Company**
+### * 부록: 외부 탐색팀 (Frontline Scout)
+* **목적:** 외부 커뮤니티, SNS 등의 언더그라운드 이슈를 능동 수집하여 2번 정보검증분석센터 단방향 주입함.

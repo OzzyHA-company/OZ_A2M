@@ -1,0 +1,14 @@
+# OZ_A2M MQTT ACL Configuration
+
+# Admin user has full access
+user oz_admin
+topic readwrite oz/a2m/#
+topic readwrite $SYS/#
+
+# Anonymous users - no access (for security)
+
+# Pattern-based permissions for departments
+pattern read oz/a2m/signal/%u
+pattern readwrite oz/a2m/status/%u
+pattern readwrite oz/a2m/log/%u
+pattern read oz/a2m/command/%u

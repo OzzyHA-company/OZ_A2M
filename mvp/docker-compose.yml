@@ -1,0 +1,84 @@
+version: '3.8'
+
+services:
+  # MQTT Broker - Mosquitto
+  mqtt-broker:
+    image: eclipse-mosquitto:2.0.18
+    container_name: oz_a2m_mqtt
+    ports:
+      - "1883:1883"    # MQTT port
+      - "9001:9001"    # WebSocket port
+    volumes:
+      - ./config/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+      - mqtt_data:/mosquitto/data
+      - mqtt_logs:/mosquitto/log
+    networks:
+      - oz_a2m_network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "mosquitto_pub", "-h", "localhost", "-t", "health", "-m", "test", "-r"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # FastAPI Gateway
+  api-gateway:
+    build:
+      context: ./gateway
+      dockerfile: Dockerfile
+    container_name: oz_a2m_gateway
+    ports:
+      - "8000:8000"
+    environment:
+      - MQTT_HOST=mqtt-broker
+      - MQTT_PORT=1883
+      - API_PORT=8000
+      - LOG_LEVEL=info
+      - ENVIRONMENT=production
+    volumes:
+      - ./gateway:/app
+      - gateway_logs:/app/logs
+    networks:
+      - oz_a2m_network
+    depends_on:
+      mqtt-broker:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Scalping Bot
+  scalping-bot:
+    build:
+      context: ./bot
+      dockerfile: Dockerfile
+    container_name: oz_a2m_bot
+    environment:
+      - MQTT_HOST=mqtt-broker
+      - MQTT_PORT=1883
+      - BOT_ID=scalping_bot_001
+      - SYMBOL=BTC/USDT
+      - TIMEFRAME=1m
+      - RISK_PER_TRADE=0.01
+      - STOP_LOSS_PCT=0.005
+      - TAKE_PROFIT_PCT=0.01
+    networks:
+      - oz_a2m_network
+    depends_on:
+      - mqtt-broker
+      - api-gateway
+    restart: unless-stopped
+    profiles:
+      - bot
+
+volumes:
+  mqtt_data:
+  mqtt_logs:
+  gateway_logs:
+
+networks:
+  oz_a2m_network:
+    driver: bridge
