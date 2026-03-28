@@ -1,0 +1,112 @@
+# OZ_A2M Observability Stack
+# Phase 7: Jaeger, Prometheus, Grafana
+
+version: '3.8'
+
+services:
+  # Jaeger - Distributed Tracing
+  jaeger:
+    image: jaegertracing/all-in-one:1.48
+    container_name: oza2m-jaeger
+    ports:
+      - "16686:16686"   # UI
+      - "4317:4317"     # OTLP gRPC
+      - "4318:4318"     # OTLP HTTP
+      - "14250:14250"   # gRPC
+      - "14268:14268"   # HTTP
+    environment:
+      - COLLECTOR_OTLP_ENABLED=true
+    networks:
+      - oza2m-observability
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+
+  # Prometheus - Metrics
+  prometheus:
+    image: prom/prometheus:v2.47.0
+    container_name: oza2m-prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus-data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--storage.tsdb.retention.time=15d'
+      - '--web.enable-lifecycle'
+      - '--web.enable-admin-api'
+    networks:
+      - oza2m-observability
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+
+  # Grafana - Visualization
+  grafana:
+    image: grafana/grafana:10.1.0
+    container_name: oza2m-grafana-phase7
+    ports:
+      - "3001:3000"
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./grafana/provisioning:/etc/grafana/provisioning
+      - ./grafana/dashboards:/var/lib/grafana/dashboards
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=oza2m_admin
+      - GF_USERS_ALLOW_SIGN_UP=false
+      - GF_INSTALL_PLUGINS=grafana-clock-panel,grafana-simple-json-datasource
+    networks:
+      - oza2m-observability
+    depends_on:
+      - prometheus
+      - jaeger
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+
+  # Node Exporter - System metrics
+  node-exporter:
+    image: prom/node-exporter:v1.6.1
+    container_name: oza2m-node-exporter
+    ports:
+      - "9100:9100"
+    volumes:
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /:/rootfs:ro
+    command:
+      - '--path.procfs=/host/proc'
+      - '--path.rootfs=/rootfs'
+      - '--path.sysfs=/host/sys'
+      - '--collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc)($$|/)'
+    networks:
+      - oza2m-observability
+
+  # Cadvisor - Container metrics
+  cadvisor:
+    image: gcr.io/cadvisor/cadvisor:v0.47.2
+    container_name: oza2m-cadvisor
+    ports:
+      - "8081:8080"
+    volumes:
+      - /:/rootfs:ro
+      - /var/run:/var/run:ro
+      - /sys:/sys:ro
+      - /var/lib/docker/:/var/lib/docker:ro
+      - /dev/disk/:/dev/disk:ro
+    privileged: true
+    networks:
+      - oza2m-observability
+
+volumes:
+  prometheus-data:
+  grafana-data:
+
+networks:
+  oza2m-observability:
+    driver: bridge

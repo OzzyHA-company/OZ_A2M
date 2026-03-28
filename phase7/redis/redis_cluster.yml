@@ -1,0 +1,135 @@
+# Redis Cluster for OZ_A2M Phase 7
+# High Availability Caching Layer
+
+version: '3.8'
+
+services:
+  # Redis Master Nodes
+  redis-master-1:
+    image: redis:7-alpine
+    container_name: oza2m-redis-master-1
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-master-1-data:/data
+      - ./config/redis-master.conf:/usr/local/etc/redis/redis.conf
+    command: redis-server /usr/local/etc/redis/redis.conf
+    networks:
+      - oza2m-redis
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+
+  redis-master-2:
+    image: redis:7-alpine
+    container_name: oza2m-redis-master-2
+    ports:
+      - "6380:6379"
+    volumes:
+      - redis-master-2-data:/data
+      - ./config/redis-master.conf:/usr/local/etc/redis/redis.conf
+    command: redis-server /usr/local/etc/redis/redis.conf
+    networks:
+      - oza2m-redis
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+
+  redis-master-3:
+    image: redis:7-alpine
+    container_name: oza2m-redis-master-3
+    ports:
+      - "6381:6379"
+    volumes:
+      - redis-master-3-data:/data
+      - ./config/redis-master.conf:/usr/local/etc/redis/redis.conf
+    command: redis-server /usr/local/etc/redis/redis.conf
+    networks:
+      - oza2m-redis
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+
+  # Redis Replica Nodes
+  redis-replica-1:
+    image: redis:7-alpine
+    container_name: oza2m-redis-replica-1
+    ports:
+      - "6382:6379"
+    volumes:
+      - redis-replica-1-data:/data
+    command: redis-server --replicaof redis-master-1 6379
+    networks:
+      - oza2m-redis
+    depends_on:
+      - redis-master-1
+
+  redis-replica-2:
+    image: redis:7-alpine
+    container_name: oza2m-redis-replica-2
+    ports:
+      - "6383:6379"
+    volumes:
+      - redis-replica-2-data:/data
+    command: redis-server --replicaof redis-master-2 6379
+    networks:
+      - oza2m-redis
+    depends_on:
+      - redis-master-2
+
+  redis-replica-3:
+    image: redis:7-alpine
+    container_name: oza2m-redis-replica-3
+    ports:
+      - "6384:6379"
+    volumes:
+      - redis-replica-3-data:/data
+    command: redis-server --replicaof redis-master-3 6379
+    networks:
+      - oza2m-redis
+    depends_on:
+      - redis-master-3
+
+  # Redis Sentinel for HA
+  redis-sentinel-1:
+    image: redis:7-alpine
+    container_name: oza2m-redis-sentinel-1
+    ports:
+      - "26379:26379"
+    volumes:
+      - ./config/sentinel.conf:/usr/local/etc/redis/sentinel.conf
+    command: redis-sentinel /usr/local/etc/redis/sentinel.conf
+    networks:
+      - oza2m-redis
+    depends_on:
+      - redis-master-1
+      - redis-master-2
+      - redis-master-3
+
+  # Redis Exporter for Prometheus
+  redis-exporter:
+    image: oliver006/redis_exporter:latest
+    container_name: oza2m-redis-exporter
+    ports:
+      - "9121:9121"
+    environment:
+      - REDIS_ADDR=redis://redis-master-1:6379
+    networks:
+      - oza2m-redis
+    depends_on:
+      - redis-master-1
+
+volumes:
+  redis-master-1-data:
+  redis-master-2-data:
+  redis-master-3-data:
+  redis-replica-1-data:
+  redis-replica-2-data:
+  redis-replica-3-data:
+
+networks:
+  oza2m-redis:
+    driver: bridge

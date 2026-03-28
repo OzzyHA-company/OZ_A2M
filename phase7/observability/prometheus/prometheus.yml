@@ -1,0 +1,60 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  external_labels:
+    cluster: oza2m
+    replica: '{{.ExternalURL}}'
+
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets: []
+
+rule_files: []
+
+scrape_configs:
+  # Prometheus itself
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']
+    metrics_path: /metrics
+
+  # OZ_A2M Gateway
+  - job_name: 'oza2m-gateway'
+    static_configs:
+      - targets: ['host.docker.internal:8000']
+    metrics_path: /metrics
+
+  # OZ_A2M Bots
+  - job_name: 'oza2m-bots'
+    static_configs:
+      - targets:
+        - 'host.docker.internal:9101'
+        - 'host.docker.internal:9102'
+        - 'host.docker.internal:9103'
+    metrics_path: /metrics
+
+  # Redis
+  - job_name: 'redis'
+    static_configs:
+      - targets: ['host.docker.internal:9121']
+
+  # Kafka
+  - job_name: 'kafka'
+    static_configs:
+      - targets: ['host.docker.internal:9308']
+
+  # Node Exporter
+  - job_name: 'node-exporter'
+    static_configs:
+      - targets: ['node-exporter:9100']
+
+  # Cadvisor
+  - job_name: 'cadvisor'
+    static_configs:
+      - targets: ['cadvisor:8080']
+
+  # Elasticsearch
+  - job_name: 'elasticsearch'
+    static_configs:
+      - targets: ['host.docker.internal:9114']
