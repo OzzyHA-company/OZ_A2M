@@ -296,6 +296,146 @@ async def websocket_endpoint(websocket: WebSocket):
 # Include LLM Router
 app.include_router(llm_router)
 
+
+# ===== Bot Management Endpoints =====
+
+# 봇 레지스트리 (실제 구현에서는 DB 사용)
+_registered_bots: Dict[str, Dict[str, Any]] = {
+    "scalping_bot_001": {
+        "bot_id": "scalping_bot_001",
+        "name": "Scalping Bot",
+        "type": "scalping",
+        "symbol": "BTC/USDT",
+        "status": "running",
+        "timeframe": "1m",
+        "last_seen": datetime.utcnow().isoformat()
+    },
+    "trend_follower_001": {
+        "bot_id": "trend_follower_001",
+        "name": "Trend Follower",
+        "type": "trend_following",
+        "symbol": "BTC/USDT",
+        "status": "stopped",
+        "timeframe": "15m",
+        "last_seen": None
+    }
+}
+
+
+@app.get("/bots")
+async def get_all_bots():
+    """전체 봇 목록 조회"""
+    return {
+        "bots": list(_registered_bots.values()),
+        "count": len(_registered_bots),
+        "timestamp": datetime.utcnow().isoformat()
+    }
+
+
+@app.get("/bots/{bot_id}")
+async def get_bot_status(bot_id: str):
+    """특정 봇 상태 조회"""
+    if bot_id not in _registered_bots:
+        raise HTTPException(status_code=404, detail=f"Bot {bot_id} not found")
+
+    bot = _registered_bots[bot_id].copy()
+    bot["timestamp"] = datetime.utcnow().isoformat()
+
+    return bot
+
+
+@app.post("/bots/{bot_id}/start")
+async def start_bot(bot_id: str):
+    """봇 시작"""
+    if bot_id not in _registered_bots:
+        raise HTTPException(status_code=404, detail=f"Bot {bot_id} not found")
+
+    if not mqtt_client or not mqtt_client.is_connected():
+        raise HTTPException(status_code=503, detail="MQTT not connected")
+
+    try:
+        # MQTT로 시작 명령 발행
+        topic = f"oz/a2m/command/{bot_id}"
+        command = {
+            "command": "start",
+            "timestamp": datetime.utcnow().isoformat()
+        }
+        mqtt_client.publish(topic, json.dumps(command), qos=1)
+
+        # 상태 업데이트
+        _registered_bots[bot_id]["status"] = "starting"
+        _registered_bots[bot_id]["last_seen"] = datetime.utcnow().isoformat()
+
+        logger.info("Bot start command sent", bot_id=bot_id)
+        return {
+            "status": "starting",
+            "bot_id": bot_id,
+            "message": f"Start command sent to {bot_id}"
+        }
+
+    except Exception as e:
+        logger.error("Failed to start bot", bot_id=bot_id, error=str(e))
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/bots/{bot_id}/stop")
+async def stop_bot(bot_id: str):
+    """봇 중지"""
+    if bot_id not in _registered_bots:
+        raise HTTPException(status_code=404, detail=f"Bot {bot_id} not found")
+
+    if not mqtt_client or not mqtt_client.is_connected():
+        raise HTTPException(status_code=503, detail="MQTT not connected")
+
+    try:
+        # MQTT로 중지 명령 발행
+        topic = f"oz/a2m/command/{bot_id}"
+        command = {
+            "command": "stop",
+            "timestamp": datetime.utcnow().isoformat()
+        }
+        mqtt_client.publish(topic, json.dumps(command), qos=1)
+
+        # 상태 업데이트
+        _registered_bots[bot_id]["status"] = "stopping"
+
+        logger.info("Bot stop command sent", bot_id=bot_id)
+        return {
+            "status": "stopping",
+            "bot_id": bot_id,
+            "message": f"Stop command sent to {bot_id}"
+        }
+
+    except Exception as e:
+        logger.error("Failed to stop bot", bot_id=bot_id, error=str(e))
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/bots/{bot_id}/performance")
+async def get_bot_performance(bot_id: str, days: int = 7):
+    """봇 성과 조회"""
+    if bot_id not in _registered_bots:
+        raise HTTPException(status_code=404, detail=f"Bot {bot_id} not found")
+
+    # TODO: 실제 성과 DB 연동
+    return {
+        "bot_id": bot_id,
+        "period_days": days,
+        "pnl": 0.0,
+        "trades": 0,
+        "win_rate": 0.0,
+        "message": "Performance data not yet implemented"
+    }
+
+
+# WebSocket 브릿지 라우터 임포트
+try:
+    from lib.messaging.websocket_bridge import router as ws_bridge_router
+    app.include_router(ws_bridge_router, prefix="/ws")
+    logger.info("WebSocket bridge router loaded")
+except ImportError as e:
+    logger.warning("WebSocket bridge not available", error=str(e))
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(
