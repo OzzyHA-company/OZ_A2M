@@ -1,0 +1,165 @@
+version: "3.9"
+
+services:
+  # MQTT Broker
+  mosquitto:
+    image: eclipse-mosquitto:2.0.18
+    container_name: oz_mosquitto
+    restart: unless-stopped
+    ports:
+      - "1883:1883"
+      - "9001:9001"
+    volumes:
+      - ./config/mosquitto:/mosquitto/config
+      - mosquitto_data:/mosquitto/data
+      - mosquitto_logs:/mosquitto/log
+    networks:
+      - oz_network
+    healthcheck:
+      test: ["CMD", "mosquitto_pub", "-t", "health", "-m", "test", "-r"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Redis Cache
+  redis:
+    image: redis:7.2-alpine
+    container_name: oz_redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes --maxmemory 512mb --maxmemory-policy allkeys-lru
+    networks:
+      - oz_network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  # Elasticsearch
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.12.0
+    container_name: oz_elasticsearch
+    restart: unless-stopped
+    environment:
+      - discovery.type=single-node
+      - xpack.security.enabled=false
+      - "ES_JAVA_OPTS=-Xms1g -Xmx1g"
+      - cluster.routing.allocation.disk.threshold_enabled=false
+    ports:
+      - "9200:9200"
+    volumes:
+      - es_data:/usr/share/elasticsearch/data
+    networks:
+      - oz_network
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:9200/_cluster/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Netdata Monitoring
+  netdata:
+    image: netdata/netdata:v1.44.0
+    container_name: oz_netdata
+    restart: unless-stopped
+    ports:
+      - "19999:19999"
+    volumes:
+      - netdata_config:/etc/netdata
+      - netdata_lib:/var/lib/netdata
+      - netdata_cache:/var/cache/netdata
+      - /etc/passwd:/host/etc/passwd:ro
+      - /etc/group:/host/etc/group:ro
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    environment:
+      - NETDATA_CLAIM_TOKEN=${NETDATA_CLAIM_TOKEN:-}
+      - NETDATA_CLAIM_URL=${NETDATA_CLAIM_URL:-}
+    networks:
+      - oz_network
+    cap_add:
+      - SYS_PTRACE
+      - SYS_ADMIN
+
+  # FastAPI Gateway
+  gateway:
+    build:
+      context: .
+      dockerfile: department_1/Dockerfile
+    container_name: oz_gateway
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      - ENVIRONMENT=production
+      - MQTT_HOST=mosquitto
+      - MQTT_PORT=1883
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - ES_HOST=elasticsearch
+      - ES_PORT=9200
+    volumes:
+      - ./department_1/src:/app/src:ro
+      - shared_logs:/app/logs
+    depends_on:
+      mosquitto:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      elasticsearch:
+        condition: service_healthy
+    networks:
+      - oz_network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Trading Engine (Freqtrade)
+  trading:
+    build:
+      context: .
+      dockerfile: department_7/Dockerfile
+    container_name: oz_trading
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    environment:
+      - FREQTRADE__EXCHANGE__KEY=${EXCHANGE_API_KEY}
+      - FREQTRADE__EXCHANGE__SECRET=${EXCHANGE_API_SECRET}
+      - MQTT_HOST=mosquitto
+      - REDIS_HOST=redis
+    volumes:
+      - ./department_7/user_data:/freqtrade/user_data
+      - ./department_7/config:/freqtrade/config
+      - shared_logs:/freqtrade/logs
+    depends_on:
+      mosquitto:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - oz_network
+
+volumes:
+  mosquitto_data:
+  mosquitto_logs:
+  redis_data:
+  es_data:
+  netdata_config:
+  netdata_lib:
+  netdata_cache:
+  shared_logs:
+
+networks:
+  oz_network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16
