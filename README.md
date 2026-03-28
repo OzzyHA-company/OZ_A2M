@@ -1,4 +1,7 @@
 # OZ_A2M
+
+![CI](https://github.com/veveenv/OZ_A2M/actions/workflows/ci.yml/badge.svg)
+
 # [Project] OZ_A2M (AI Agent to Market) Core Architecture
 **소속:** OzzyHA_company (Human + AI)
 **총괄 최고경영자(CEO):** Ozzy

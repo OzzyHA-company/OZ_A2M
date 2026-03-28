@@ -1,0 +1,82 @@
+name: OZ_A2M CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ['3.11', '3.12']
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e .
+          pip install pytest pytest-asyncio
+
+      - name: Run tests
+        run: |
+          python -m pytest tests/ -v --tb=short -p no:anchorpy
+
+      - name: Check code style (flake8)
+        run: |
+          pip install flake8
+          flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics --exclude=__pycache__,.venv,venv,node_modules
+
+      - name: Type check (mypy)
+        run: |
+          pip install mypy
+          mypy lib/ occore/ --ignore-missing-imports --exclude '/(__pycache__|\.venv|venv)/' || true
+
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: |
+          pip install black isort
+
+      - name: Check code formatting (black)
+        run: |
+          black --check --diff . || true
+
+      - name: Check import sorting (isort)
+        run: |
+          isort --check-only --diff . || true
+
+  security:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run Bandit security check
+        run: |
+          pip install bandit
+          bandit -r . -f json -o bandit-report.json || true
+          bandit -r . || true
+
+      - name: Upload security report
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: bandit-security-report
+          path: bandit-report.json
