@@ -55,6 +55,8 @@ dependencies = [
     "opentelemetry-instrumentation-kafka-python>=0.43b0",
     # Temporal
     "temporalio>=1.5.0",
+    # Process Mining
+    "pm4py>=2.7.0",
 ]
 
 [project.optional-dependencies]

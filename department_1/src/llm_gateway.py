@@ -56,32 +56,90 @@ class LLMResponse(BaseModel):
     timestamp: datetime = Field(default_factory=datetime.utcnow)
 
 
+class LLMRole(str, Enum):
+    """LLM 역할 유형"""
+    MARKET_ANALYSIS = "market_analysis"      # 시장 분석 → [Gemini, Ollama]
+    COMPLEX_REASONING = "complex_reasoning"  # 복잡 추론 → [Claude, OpenAI] (키 필요)
+    QUICK_RESPONSE = "quick_response"        # 빠른 응답 → [Ollama]
+    COST_SENSITIVE = "cost_sensitive"        # 비용 민감 → [Ollama, Gemini]
+    TRADING_SIGNAL = "trading_signal"        # 매매 신호 → [Ollama]
+    CODE_GENERATION = "code_generation"      # 코드 생성 → [Claude, Gemini]
+    SUMMARIZATION = "summarization"          # 요약 → [Ollama, Gemini]
+
+
+class CacheMetrics:
+    """캐시 메트릭스"""
+    def __init__(self):
+        self.hits: int = 0
+        self.misses: int = 0
+        self.total_requests: int = 0
+
+    @property
+    def hit_rate(self) -> float:
+        """캐시 히트율"""
+        if self.total_requests == 0:
+            return 0.0
+        return self.hits / self.total_requests
+
+    def record_hit(self):
+        """히트 기록"""
+        self.hits += 1
+        self.total_requests += 1
+
+    def record_miss(self):
+        """미스 기록"""
+        self.misses += 1
+        self.total_requests += 1
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "hits": self.hits,
+            "misses": self.misses,
+            "total_requests": self.total_requests,
+            "hit_rate": self.hit_rate,
+        }
+
+
 class LLMGateway:
     """
     LLM Gateway - 스마트 라우팅 및 폴�택
 
     기능:
-    - 작업 유형별 라우팅
+    - 역할 기반 라우팅
     - 자동 폴�택
-    - 응답 캐싱
+    - 응답 캐싱 (히트율 메트릭스)
     - 상태 모니터링
     """
 
-    # 작업별 선호 제공자
+    # 역할별 선호 제공자 (우선순위 순)
+    ROLE_ROUTING: Dict[LLMRole, List[str]] = {
+        LLMRole.MARKET_ANALYSIS: ["gemini", "ollama"],
+        LLMRole.COMPLEX_REASONING: ["claude", "openai", "gemini", "ollama"],
+        LLMRole.QUICK_RESPONSE: ["ollama", "gemini"],
+        LLMRole.COST_SENSITIVE: ["ollama", "gemini"],
+        LLMRole.TRADING_SIGNAL: ["ollama"],  # 빠른 응답 필요
+        LLMRole.CODE_GENERATION: ["claude", "gemini", "ollama"],
+        LLMRole.SUMMARIZATION: ["ollama", "gemini"],
+    }
+
+    # 레거시 작업별 라우팅 (하위 호환)
     TASK_ROUTING = {
         "analysis": ["gemini", "ollama"],
         "complex": ["gemini", "ollama"],
         "quick": ["ollama"],
         "cost_sensitive": ["ollama", "gemini"],
-        "trading_signal": ["ollama"],  # 빠른 응답 필요
-        "market_analysis": ["gemini"],  # 고품질 분석
+        "trading_signal": ["ollama"],
+        "market_analysis": ["gemini"],
     }
 
     def __init__(self):
         self.providers: Dict[str, LLMProvider] = {}
         self.cache: TTLCache = TTLCache(maxsize=1000, ttl=300)  # 5분 캐시
+        self.cache_metrics = CacheMetrics()
         self._setup_default_providers()
+        self._setup_optional_providers()
         logger.info("LLM Gateway initialized")
+        logger.info(f"Cache metrics enabled: hit_rate tracking active")
 
     def _setup_default_providers(self):
         """기본 제공자 설정"""
@@ -100,6 +158,44 @@ class LLMGateway:
             model="gemini-pro",
             priority=2,
         ))
+
+    def _setup_optional_providers(self):
+        """
+        선택적 제공자 설정 (API 키 필요)
+
+        ⚠️ 사용자 승인 필요: 실제 API 키 입력 시 활성화
+        """
+        import os
+
+        # OpenAI (API 키 필요)
+        if os.getenv("OPENAI_API_KEY"):
+            try:
+                self.register_provider(LLMProvider(
+                    name="openai",
+                    url="https://api.openai.com/v1/chat/completions",
+                    model="gpt-4",
+                    priority=2,
+                ))
+                logger.info("OpenAI provider registered (API key found)")
+            except Exception as e:
+                logger.warning(f"Failed to register OpenAI provider: {e}")
+        else:
+            logger.info("OpenAI provider not registered (API key not set)")
+
+        # Claude (API 키 필요)
+        if os.getenv("ANTHROPIC_API_KEY"):
+            try:
+                self.register_provider(LLMProvider(
+                    name="claude",
+                    url="https://api.anthropic.com/v1/messages",
+                    model="claude-3-sonnet-20240229",
+                    priority=1,  # 높은 우선순위
+                ))
+                logger.info("Claude provider registered (API key found)")
+            except Exception as e:
+                logger.warning(f"Failed to register Claude provider: {e}")
+        else:
+            logger.info("Claude provider not registered (API key not set)")
 
     def register_provider(self, provider: LLMProvider):
         """제공자 등록"""
@@ -133,6 +229,46 @@ class LLMGateway:
 
         return None
 
+    def select_provider_by_role(self, role: LLMRole) -> Optional[LLMProvider]:
+        """
+        역할 기반 제공자 선택
+
+        Args:
+            role: LLM 역할 유형
+
+        Returns:
+            선택된 제공자 또는 None
+        """
+        preferred = self.ROLE_ROUTING.get(role, ["ollama", "gemini"])
+
+        for provider_name in preferred:
+            provider = self.providers.get(provider_name)
+            if provider and provider.state == LLMState.OK:
+                logger.debug(f"Selected provider {provider_name} for role {role.value}")
+                return provider
+
+        # 모든 선호 제공자가 다운인 경우, 사용 가능한 제공자 반환
+        available = [p for p in self.providers.values() if p.state == LLMState.OK]
+        if available:
+            fallback = min(available, key=lambda p: p.priority)
+            logger.warning(
+                f"No preferred provider for role {role.value}, "
+                f"falling back to {fallback.name}"
+            )
+            return fallback
+
+        logger.error(f"No available providers for role {role.value}")
+        return None
+
+    def get_cache_metrics(self) -> Dict[str, Any]:
+        """캐시 메트릭스 조회"""
+        return self.cache_metrics.to_dict()
+
+    def reset_cache_metrics(self):
+        """캐시 메트릭스 리셋"""
+        self.cache_metrics = CacheMetrics()
+        logger.info("Cache metrics reset")
+
     def _generate_cache_key(self, task: str, prompt: str) -> str:
         """캐시 키 생성"""
         import hashlib
@@ -161,6 +297,8 @@ class LLMGateway:
         if cache_key in self.cache:
             cached = self.cache[cache_key]
             latency = (asyncio.get_event_loop().time() - start_time) * 1000
+            self.cache_metrics.record_hit()  # 캐시 히트 기록
+            logger.debug(f"Cache hit for {request.task} (hit_rate: {self.cache_metrics.hit_rate:.2%})")
             return LLMResponse(
                 provider=cached["provider"],
                 model=cached["model"],
@@ -168,6 +306,8 @@ class LLMGateway:
                 latency_ms=latency,
                 cached=True
             )
+
+        self.cache_metrics.record_miss()  # 캐시 미스 기록
 
         # 제공자 선택
         if force_provider:
@@ -185,6 +325,10 @@ class LLMGateway:
                 response = await self._call_ollama(provider, request)
             elif provider.name == "gemini":
                 response = await self._call_gemini(provider, request)
+            elif provider.name == "openai":
+                response = await self._call_openai(provider, request)
+            elif provider.name == "claude":
+                response = await self._call_claude(provider, request)
             else:
                 raise ValueError(f"Unsupported provider: {provider.name}")
 
@@ -288,19 +432,100 @@ class LLMGateway:
 
             return ""
 
-    def get_health(self) -> Dict[str, Any]:
-        """전체 상태 반환"""
-        return {
-            name: {
-                "state": p.state.value,
-                "priority": p.priority,
-                "error_count": p.error_count,
-                "last_error": p.last_error.isoformat() if p.last_error else None
+    async def _call_openai(self, provider: LLMProvider, request: LLMRequest) -> str:
+        """OpenAI API 호출"""
+        import os
+        api_key = os.getenv("OPENAI_API_KEY")
+        if not api_key:
+            raise ValueError("OPENAI_API_KEY environment variable not set")
+
+        async with httpx.AsyncClient(timeout=provider.timeout) as client:
+            headers = {
+                "Authorization": f"Bearer {api_key}",
+                "Content-Type": "application/json",
             }
-            for name, p in self.providers.items()
+            payload = {
+                "model": provider.model,
+                "messages": [{"role": "user", "content": request.prompt}],
+                "temperature": request.temperature,
+            }
+            if request.max_tokens:
+                payload["max_tokens"] = request.max_tokens
+
+            response = await client.post(
+                provider.url,
+                headers=headers,
+                json=payload
+            )
+            response.raise_for_status()
+            data = response.json()
+
+            # OpenAI 응답 파싱
+            choices = data.get("choices", [])
+            if choices:
+                message = choices[0].get("message", {})
+                return message.get("content", "")
+
+            return ""
+
+    async def _call_claude(self, provider: LLMProvider, request: LLMRequest) -> str:
+        """Claude API 호출"""
+        import os
+        api_key = os.getenv("ANTHROPIC_API_KEY")
+        if not api_key:
+            raise ValueError("ANTHROPIC_API_KEY environment variable not set")
+
+        async with httpx.AsyncClient(timeout=provider.timeout) as client:
+            headers = {
+                "x-api-key": api_key,
+                "anthropic-version": "2023-06-01",
+                "Content-Type": "application/json",
+            }
+            payload = {
+                "model": provider.model,
+                "messages": [{"role": "user", "content": request.prompt}],
+                "max_tokens": request.max_tokens or 1024,
+                "temperature": request.temperature,
+            }
+
+            response = await client.post(
+                provider.url,
+                headers=headers,
+                json=payload
+            )
+            response.raise_for_status()
+            data = response.json()
+
+            # Claude 응답 파싱
+            content = data.get("content", [])
+            if content:
+                return content[0].get("text", "")
+
+            return ""
+
+    def get_health(self) -> Dict[str, Any]:
+        """전체 상태 반환 (캐시 메트릭스 포함)"""
+        return {
+            "providers": {
+                name: {
+                    "state": p.state.value,
+                    "priority": p.priority,
+                    "error_count": p.error_count,
+                    "last_error": p.last_error.isoformat() if p.last_error else None
+                }
+                for name, p in self.providers.items()
+            },
+            "cache": self.get_cache_metrics(),
+            "routing": {
+                "available_roles": [r.value for r in LLMRole],
+                "role_routing": {
+                    r.value: providers
+                    for r, providers in self.ROLE_ROUTING.items()
+                },
+            },
         }
 
-    async def recover_provider(self, name: str):
+    async def recover_provider(self, name: str) -> bool:
         """제공자 복구 시도"""
         provider = self.providers.get(name)
         if not provider:
@@ -313,6 +538,10 @@ class LLMGateway:
                 await self._call_ollama(provider, test_request)
             elif provider.name == "gemini":
                 await self._call_gemini(provider, test_request)
+            elif provider.name == "openai":
+                await self._call_openai(provider, test_request)
+            elif provider.name == "claude":
+                await self._call_claude(provider, test_request)
 
             provider.state = LLMState.OK
             provider.error_count = 0
