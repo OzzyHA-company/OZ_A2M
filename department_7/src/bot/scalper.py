@@ -12,8 +12,15 @@ from enum import Enum
 
 import ccxt
 
-from occore.logger import get_logger
-from occore.messaging.mqtt_client import MQTTClient
+import sys
+from pathlib import Path
+
+# Add project root to path for imports
+project_root = Path(__file__).parent.parent.parent.parent
+sys.path.insert(0, str(project_root))
+
+from lib.core.logger import get_logger
+from lib.messaging.mqtt_client import MQTTClient, MQTTConfig
 
 logger = get_logger(__name__)
 
@@ -119,7 +126,12 @@ class ScalpingBot:
         self.exchange: Optional[ccxt.Exchange] = None
 
         # MQTT
-        self.mqtt = MQTTClient(client_id=bot_id)
+        mqtt_config = MQTTConfig(
+            host=mqtt_host,
+            port=mqtt_port,
+            client_id=bot_id
+        )
+        self.mqtt = MQTTClient(config=mqtt_config)
         self.mqtt_host = mqtt_host
         self.mqtt_port = mqtt_port
 
@@ -150,35 +162,86 @@ class ScalpingBot:
             logger.info("Exchange set to sandbox mode")
 
         # MQTT 연결
-        await self.mqtt.connect(self.mqtt_host, self.mqtt_port)
-        self.mqtt.on_message = self._on_mqtt_message
-        await self.mqtt.subscribe("signals/scalping")
-        await self.mqtt.subscribe(f"orders/{self.bot_id}/execute")
+        try:
+            await self.mqtt.connect()
+            await self.mqtt.subscribe("signals/scalping", self._on_mqtt_message)
+            await self.mqtt.subscribe(f"orders/{self.bot_id}/execute", self._on_mqtt_message)
+            logger.info(f"MQTT connected for bot {self.bot_id}")
+        except Exception as e:
+            logger.error(f"MQTT connection failed: {e}")
+            self.state = BotState.ERROR
+            raise RuntimeError(f"Failed to connect MQTT: {e}")
 
         self.state = BotState.RUNNING
         logger.info(f"ScalpingBot {self.bot_id} initialized and running")
 
     async def run(self):
         """봇 메인 루프"""
-        await self.initialize()
+        try:
+            await self.initialize()
+        except Exception as e:
+            logger.error(f"Bot initialization failed: {e}")
+            self.state = BotState.ERROR
+            raise
 
         try:
             while self.state == BotState.RUNNING:
-                # 포지션 모니터링 (손절/익절 체크)
-                if self.position:
-                    await self._check_exit_conditions()
+                try:
+                    # 포지션 모니터링 (손절/익절 체크)
+                    if self.position:
+                        await self._check_exit_conditions()
 
-                # 잔고 업데이트
-                await self._update_balance()
+                    # 잔고 업데이트
+                    await self._update_balance()
 
-                await asyncio.sleep(5)  # 5초마다 체크
+                    await asyncio.sleep(5)  # 5초마다 체크
+
+                except ccxt.NetworkError as e:
+                    logger.error(f"Network error in bot loop: {e}")
+                    await asyncio.sleep(30)  # 네트워크 오류 시 30초 대기
+                    continue
+                except ccxt.ExchangeError as e:
+                    logger.error(f"Exchange error in bot loop: {e}")
+                    self.state = BotState.ERROR
+                    await self._safe_stop()
+                    raise
+                except Exception as e:
+                    logger.error(f"Unexpected error in bot loop: {e}")
+                    self.state = BotState.ERROR
+                    await self._safe_stop()
+                    raise
 
         except asyncio.CancelledError:
             logger.info("Bot loop cancelled")
+            await self._safe_stop()
         except Exception as e:
             logger.error(f"Bot error: {e}")
             self.state = BotState.ERROR
+            await self._safe_stop()
             raise
+
+    async def _safe_stop(self):
+        """안전한 봇 중지 (예외 발생 시 호출)"""
+        logger.warning(f"Safe stopping bot {self.bot_id} due to error")
+        try:
+            self.state = BotState.ERROR
+
+            # 열린 포지션 정리
+            if self.position:
+                try:
+                    await self.close_position()
+                except Exception as e:
+                    logger.error(f"Failed to close position during safe stop: {e}")
+
+            # MQTT 연결 해제
+            try:
+                await self.mqtt.disconnect()
+            except Exception as e:
+                logger.error(f"Failed to disconnect MQTT during safe stop: {e}")
+
+            logger.info(f"ScalpingBot {self.bot_id} safely stopped")
+        except Exception as e:
+            logger.error(f"Error during safe stop: {e}")
 
     async def stop(self):
         """봇 중지"""
@@ -191,16 +254,18 @@ class ScalpingBot:
         await self.mqtt.disconnect()
         logger.info(f"ScalpingBot {self.bot_id} stopped")
 
-    def _on_mqtt_message(self, client, topic, payload, qos, properties):
+    async def _on_mqtt_message(self, message):
         """MQTT 메시지 처리"""
         try:
-            msg = json.loads(payload.decode())
+            topic = message.topic.value
+            payload = message.payload.decode()
+            msg = json.loads(payload)
             logger.debug(f"Received message on {topic}: {msg}")
 
             if topic == "signals/scalping":
-                asyncio.create_task(self._handle_signal(msg))
+                await self._handle_signal(msg)
             elif topic == f"orders/{self.bot_id}/execute":
-                asyncio.create_task(self._handle_manual_order(msg))
+                await self._handle_manual_order(msg)
 
         except Exception as e:
             logger.error(f"Error handling MQTT message: {e}")
@@ -279,8 +344,23 @@ class ScalpingBot:
                 self.on_position_change(self.position)
             await self._publish_trade(trade)
 
+        except ccxt.NetworkError as e:
+            logger.error(f"Network error opening position: {e}")
+            # 네트워크 오류는 재시도 가능하므로 상태 변경 없음
+        except ccxt.InsufficientFunds as e:
+            logger.error(f"Insufficient funds: {e}")
+            await self._safe_stop()
+            raise RuntimeError(f"Insufficient funds, bot stopped: {e}")
+        except ccxt.ExchangeError as e:
+            logger.error(f"Exchange error opening position: {e}")
+            self.state = BotState.ERROR
+            await self._safe_stop()
+            raise
         except Exception as e:
             logger.error(f"Failed to open long position: {e}")
+            self.state = BotState.ERROR
+            await self._safe_stop()
+            raise
 
     async def open_short(self, amount: float):
         """숏 포지션 진입 (선물 거래 필요)"""
@@ -329,8 +409,17 @@ class ScalpingBot:
             if self.on_position_change:
                 self.on_position_change(None)
 
+        except ccxt.NetworkError as e:
+            logger.error(f"Network error closing position: {e}")
+            # 포지션 동기화 시도
+            await self._sync_position()
+        except ccxt.ExchangeError as e:
+            logger.error(f"Exchange error closing position: {e}")
+            self.state = BotState.ERROR
+            raise
         except Exception as e:
             logger.error(f"Failed to close position: {e}")
+            raise
 
     async def _check_exit_conditions(self):
         """손절/익절 조건 체크"""
@@ -366,11 +455,38 @@ class ScalpingBot:
         except Exception as e:
             logger.error(f"Error checking exit conditions: {e}")
 
+    async def _sync_position(self):
+        """거래소에서 포지션 상태 동기화"""
+        try:
+            positions = self.exchange.fetch_positions([self.symbol])
+            for pos in positions:
+                if pos['symbol'] == self.symbol and pos['contracts'] > 0:
+                    # 로컬 포지션 정보 업데이트
+                    if not self.position:
+                        self.position = Position(
+                            symbol=self.symbol,
+                            side=PositionSide.LONG if pos['side'] == 'long' else PositionSide.SHORT,
+                            entry_price=pos['entryPrice'],
+                            amount=pos['contracts'],
+                            entry_time=datetime.utcnow()
+                        )
+                        logger.info(f"Position synced from exchange: {self.position}")
+                    break
+            else:
+                # 거래소에 포지션이 없으면 로컬도 클리어
+                if self.position:
+                    logger.warning("Position not found in exchange, clearing local state")
+                    self.position = None
+        except Exception as e:
+            logger.error(f"Failed to sync position: {e}")
+
     async def _update_balance(self):
         """잔고 업데이트"""
         try:
             balance = self.exchange.fetch_balance()
             self.balance = balance["USDT"]["free"] if "USDT" in balance else 0.0
+        except ccxt.NetworkError as e:
+            logger.warning(f"Network error updating balance: {e}")
         except Exception as e:
             logger.error(f"Error updating balance: {e}")
 

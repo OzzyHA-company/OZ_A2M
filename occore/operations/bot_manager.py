@@ -11,12 +11,17 @@ from datetime import datetime
 from typing import Dict, List, Optional, Callable, Any, Type
 from dataclasses import dataclass, field
 
-try:
-    from gmqtt import Client as MQTTClient
-    MQTT_AVAILABLE = True
-except ImportError:
-    MQTT_AVAILABLE = False
-    MQTTClient = None
+# Use unified aiomqtt-based MQTT client
+import aiomqtt
+import sys
+from pathlib import Path
+
+# Add project root to path for imports
+project_root = Path(__file__).parent.parent.parent
+sys.path.insert(0, str(project_root))
+
+from lib.messaging.mqtt_client import MQTTClient, MQTTConfig
+MQTT_AVAILABLE = True
 
 from .models import BotConfig, BotStatus, BotStrategy
 from .execution_engine import ExecutionEngine
@@ -71,7 +76,7 @@ class BotManager:
         self.bot_classes: Dict[str, Type] = {}
 
         # MQTT
-        self.mqtt_client: Optional[Any] = None
+        self.mqtt_client: Optional[MQTTClient] = None
         self._mqtt_connected = False
 
         # 콜백
@@ -119,12 +124,16 @@ class BotManager:
     async def _connect_mqtt(self):
         """MQTT 연결"""
         try:
-            self.mqtt_client = MQTTClient("bot_manager")
-            self.mqtt_client.on_message = self._on_mqtt_message
-            await self.mqtt_client.connect(self.mqtt_host, self.mqtt_port)
+            config = MQTTConfig(
+                host=self.mqtt_host,
+                port=self.mqtt_port,
+                client_id="bot_manager"
+            )
+            self.mqtt_client = MQTTClient(config)
+            await self.mqtt_client.connect()
 
             # 명령 토픽 구독
-            self.mqtt_client.subscribe("bots/+/command")
+            await self.mqtt_client.subscribe("bots/+/command", self._on_mqtt_message)
             self._mqtt_connected = True
 
             logger.info("MQTT connected for bot management")
@@ -132,15 +141,17 @@ class BotManager:
             logger.error(f"MQTT connection failed: {e}")
             self._mqtt_connected = False
 
-    def _on_mqtt_message(self, client, topic, payload, qos, properties):
+    async def _on_mqtt_message(self, message: aiomqtt.Message):
         """MQTT 메시지 수신"""
         try:
+            topic = message.topic.value
+            payload = message.payload.decode()
             msg = json.loads(payload)
             command = msg.get("command")
             bot_id = msg.get("bot_id")
 
             if command and bot_id:
-                asyncio.create_task(self._handle_command(bot_id, command, msg))
+                await self._handle_command(bot_id, command, msg)
         except Exception as e:
             logger.error(f"MQTT message error: {e}")
 
@@ -269,10 +280,16 @@ class BotManager:
             raise
 
         except Exception as e:
-            logger.error(f"Bot error: {bot_id} - {e}")
+            logger.error(f"Bot error: {bot_id} - {type(e).__name__}: {e}")
             instance.error_count += 1
             instance.last_error = str(e)
             config.status = BotStatus.ERROR
+
+            # 안전한 봇 정지
+            try:
+                await self._safe_stop_bot(instance)
+            except Exception as stop_error:
+                logger.error(f"Failed to safely stop bot {bot_id}: {stop_error}")
 
             # 콜백
             if self.on_bot_error:
@@ -280,6 +297,32 @@ class BotManager:
 
             # MQTT 발송
             await self._publish_status(bot_id, "error", error=str(e))
+
+    async def _safe_stop_bot(self, instance: BotInstance):
+        """봇 인스턴스 안전 정지"""
+        try:
+            if instance.risk_controller:
+                await instance.risk_controller.stop()
+        except Exception as e:
+            logger.warning(f"Error stopping risk controller: {e}")
+
+        try:
+            if instance.position_manager:
+                await instance.position_manager.disconnect()
+        except Exception as e:
+            logger.warning(f"Error disconnecting position manager: {e}")
+
+        try:
+            if instance.engine:
+                await instance.engine.stop()
+        except Exception as e:
+            logger.warning(f"Error stopping engine: {e}")
+
+        try:
+            if instance.connector:
+                await instance.connector.disconnect()
+        except Exception as e:
+            logger.warning(f"Error disconnecting exchange: {e}")
 
     async def stop_bot(self, bot_id: str) -> bool:
         """봇 중지"""
@@ -434,7 +477,7 @@ class BotManager:
                 **kwargs
             }
             topic = f"bots/{bot_id}/status"
-            self.mqtt_client.publish(topic, json.dumps(payload))
+            await self.mqtt_client.publish(topic, json.dumps(payload))
         except Exception as e:
             logger.error(f"MQTT publish error: {e}")
 
