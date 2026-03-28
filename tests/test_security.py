@@ -153,10 +153,11 @@ def test_audit_logger():
     # Get stats
     stats = audit.get_stats()
     print(f"\n감사 로그 통계:")
-    print(f"  - 총 로그: {stats['total_logs']}")
-    print(f"  - 오늘 로그: {stats['today_logs']}")
-    print(f"  - 미해결 알림: {stats['unresolved_alerts']}")
-    print(f"  - 고위험 이벤트: {stats['high_risk_events']}")
+    sqlite = stats.get('sqlite', stats)
+    print(f"  - 총 로그: {sqlite.get('total_logs', 'N/A')}")
+    print(f"  - 오늘 로그: {sqlite.get('today_logs', 'N/A')}")
+    print(f"  - 미해결 알림: {sqlite.get('unresolved_alerts', 'N/A')}")
+    print(f"  - 고위험 이벤트: {sqlite.get('high_risk_events', 'N/A')}")
 
     print("\n✅ Audit Logger 테스트 완료")
 
