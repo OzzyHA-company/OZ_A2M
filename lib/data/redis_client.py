@@ -4,6 +4,7 @@ import json
 from typing import Any, Optional, Union
 
 import redis.asyncio as redis
+from redis.asyncio.cluster import RedisCluster
 
 from ..core.config import get_settings
 from ..core.logger import get_logger
@@ -12,20 +13,43 @@ logger = get_logger(__name__)
 
 
 class RedisClient:
-    """Async Redis client wrapper."""
+    """Async Redis client wrapper with cluster support."""
 
-    def __init__(self):
-        self._client: Optional[redis.Redis] = None
+    def __init__(self, cluster_mode: bool = False):
+        self._client: Optional[Union[redis.Redis, RedisCluster]] = None
         self._settings = get_settings()
+        self._cluster_mode = cluster_mode or getattr(self._settings, 'redis_cluster_mode', False)
 
     async def connect(self) -> None:
-        """Connect to Redis."""
-        if self._client is None:
-            self._client = redis.from_url(
-                self._settings.redis_url,
-                decode_responses=True,
-            )
-            logger.info("Redis connected")
+        """Connect to Redis (single node or cluster)."""
+        if self._client is not None:
+            return
+
+        try:
+            if self._cluster_mode:
+                # 클러스터 모드
+                startup_nodes = getattr(self._settings, 'redis_cluster_nodes', [
+                    {"host": "localhost", "port": "6379"},
+                    {"host": "localhost", "port": "6380"},
+                    {"host": "localhost", "port": "6381"},
+                ])
+
+                self._client = RedisCluster(
+                    startup_nodes=startup_nodes,
+                    decode_responses=True,
+                    skip_full_coverage_check=True,
+                )
+                logger.info("Redis Cluster connected")
+            else:
+                # 단일 노드 모드
+                self._client = redis.from_url(
+                    self._settings.redis_url,
+                    decode_responses=True,
+                )
+                logger.info("Redis connected")
+        except Exception as e:
+            logger.error(f"Redis connection failed: {e}")
+            raise
 
     async def disconnect(self) -> None:
         """Disconnect from Redis."""
