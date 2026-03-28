@@ -103,7 +103,7 @@ class EventBus:
         mqtt_host: str = "localhost",
         mqtt_port: int = 1883,
         kafka_bootstrap: Optional[str] = None,
-        enable_kafka: bool = False
+        enable_kafka: bool = True  # Kafka 연동 활성화 (STEP 1)
     ):
         self.mqtt_host = mqtt_host
         self.mqtt_port = mqtt_port
