@@ -13,7 +13,7 @@ import httpx
 from cachetools import TTLCache
 from pydantic import BaseModel, Field
 
-from occore.logger import get_logger
+from lib.core.logger import get_logger
 
 logger = get_logger(__name__)
 

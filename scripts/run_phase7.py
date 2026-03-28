@@ -18,7 +18,7 @@ sys.path.insert(0, str(project_root / "lib"))
 import signal
 from typing import List
 
-from occore.logger import get_logger, setup_logging
+from lib.core.logger import get_logger, setup_logging
 
 logger = get_logger(__name__)
 

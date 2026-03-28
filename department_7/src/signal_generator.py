@@ -14,8 +14,8 @@ import aiohttp
 import pandas as pd
 import numpy as np
 
-from occore.logger import get_logger
-from occore.messaging.mqtt_client import MQTTClient
+from lib.core.logger import get_logger
+from lib.messaging.mqtt_client import MQTTClient
 
 logger = get_logger(__name__)
 

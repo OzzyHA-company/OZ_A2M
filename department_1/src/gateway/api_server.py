@@ -10,7 +10,7 @@ from fastapi import FastAPI, HTTPException, BackgroundTasks
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
-from occore.logger import get_logger
+from lib.core.logger import get_logger
 from llm_gateway import get_llm_gateway, LLMRequest, generate_text
 
 logger = get_logger(__name__)
