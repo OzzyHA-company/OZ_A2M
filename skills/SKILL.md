@@ -1,6 +1,7 @@
 ---
 name: oz-a2m
-description: OZ_A2M (AI Agent to Market) 프로젝트 개발 가이드. 7부서 아키텍처(관제탑, 검증분석, 보안, 유지보수, 성과분석, R&D, 데이터소스)를 활용한 자동화 트레이딩 시스템 구축 시 사용. OZ_A2M, 트레이딩 봇, 퀀트 시스템, 7부서 아키텍처 언급 시 필수 참조.
+version: 0.2.0
+description: OZ_A2M with OpenClaw + Pi-Mono + External Repos Integration. 7부서 아키텍처(관제탑, 검증분석, 보안, 유지보수, 성과분석, R&D, 데이터소스)와 Temporal, CrewAI, Ray, QLib, VectorBT, Hummingbot 등 외부 라이브러리 통합. OZ_A2M, 트레이딩 봇, 퀀트 시스템, 7부서 아키텍처, OpenClaw, Pi-Mono 언급 시 필수 참조.
 ---
 
 # OZ_A2M (AI Agent to Market) 개발 스킬
@@ -148,6 +149,83 @@ description: OZ_A2M (AI Agent to Market) 프로젝트 개발 가이드. 7부서 
 
 ---
 
+## 외부 통합 (Integrations)
+
+### OpenClaw Integration
+**경로**: `/home/ozzy-claw/openclaw` → `skills/libs/openclaw`
+
+**스킬 수**: 52개
+
+**7부서 매핑**:
+- **제1부서 (관제탑)**: discord (알림), notion (상황판), session-logs (로그)
+- **제2부서 (검증분석)**: github (코드 검증), summarize (데이터 요약)
+- **제3부서 (보안)**: 1password (인증), healthcheck (상태 확인)
+- **제4부서 (유지보수)**: healthcheck (모니터링), weather (외부 알림)
+- **제5부서 (성과분석)**: notion (리포트), nano-pdf (PDF 생성)
+- **제6부서 (R&D)**: coding-agent (전략 개발), openai-image-gen (차트)
+
+### Pi-Mono Integration
+**경로**: `/home/ozzy-claw/pi-mono` → `lib/pi/`
+
+**패키지**: 7개
+- `agent/` - 에이전트 프레임워크
+- `ai/` - AI/ML 유틸리티
+- `coding-agent/` - 코드 생성 에이전트
+- `mom/` - 메시지 지향 미들웨어
+- `pods/` - 컨테이너 오케스트레이션
+- `tui/` - 터미널 UI
+- `web-ui/` - 웹 인터페이스
+
+### 외부 라이브러리 통합
+
+| 라이브러리 | 버전 | 용도 | 설치 방식 |
+|-----------|------|------|----------|
+| **Temporal** | 최신 | 워크플로우 오케스트레이션 | Docker Compose |
+| **CrewAI** | 1.12.2 | 멀티 에이전트 시스템 | pip |
+| **Ray** | 2.54.1 | 분산 컴퓨팅 | pip |
+| **QLib** | 0.9.7 | 퀀트 연구 플랫폼 | pip |
+| **VectorBT** | 0.28.5 | 백테스팅 | pip |
+| **Hummingbot** | 최신 | 암호화폐 트레이딩 | Git Clone |
+| **yFinance** | 1.2.0 | 금융 데이터 | pip |
+| **VADER** | 3.3.2 | 감성 분석 | pip |
+| **Airflow** | 3.1.8 | 워크플로우 스케줄링 | pip |
+| **PM4Py** | 2.7.22 | 프로세스 마이닝 | pip |
+| **Sentry** | 2.56.0 | 에러 모니터링 | pip |
+| **OpenTelemetry** | 1.34.1 | 관측성 | pip |
+| **Grafana** | 최신 | 시각화 | Docker |
+
+---
+
+## 참고 리소스 (libs/)
+
+스킬의 `libs/` 폴더에 참고용 레포지토리가 클론되어 있습니다:
+
+| 레포지토리 | 용도 | 카테고리 |
+|-----------|------|---------|
+| `freqtrade/` | 암호화폐 트레이딩 봇 | Trading |
+| `hummingbot/` | 암호화폐 트레이딩 엔진 | Trading |
+| `TradingAgents/` | AI 트레이딩 에이전트 | Trading |
+| `temporal/` | 워크플로우 오케스트레이션 | Workflow |
+| `pi-mono/` | 통합 개발 플랫폼 | Integration |
+| `nuclei/` | 보안 스캐닝 | Security |
+| `netdata/` | 시스템 모니터링 | Monitoring |
+| `hey/` | HTTP 부하 테스트 | Testing |
+
+---
+
+## 아키텍처 개요
+
+```yaml
+message_bus: MQTT + Kafka (Phase 7)
+ai_orchestration: CrewAI + Temporal + Ray
+monitoring: Grafana + Sentry + OpenTelemetry + Netdata
+data_pipeline: Airflow + PM4Py
+trading_engines: Freqtrade + Hummingbot + QLib + VectorBT
+integration: OpenClaw (52 skills) + Pi-Mono (7 packages)
+```
+
+---
+
 ## 통합 인프라
 
 ### Docker Compose 설정
@@ -160,6 +238,14 @@ description: OZ_A2M (AI Agent to Market) 프로젝트 개발 가이드. 7부서 
 - Netdata 시스템 모니터링
 - 실시간 성능 메트릭
 
+**Grafana** (`phase7/observability/grafana/docker-compose.yml`):
+- 시각화 대시보드
+- 포트: 3000
+
+**Temporal** (`/home/ozzy-claw/temporal/develop/docker-compose/docker-compose.yml`):
+- 워크플로우 오케스트레이션
+- MySQL, PostgreSQL, Cassandra, Elasticsearch 포함
+
 ### 테스트 구조
 **경로**: `tests/`
 
@@ -170,6 +256,7 @@ description: OZ_A2M (AI Agent to Market) 프로젝트 개발 가이드. 7부서 
 - `test_pnl.py`
 - `test_elasticsearch_audit.py`
 - `test_netdata.py`
+- `test_p1_integration.py`
 
 ---
 
@@ -177,7 +264,7 @@ description: OZ_A2M (AI Agent to Market) 프로젝트 개발 가이드. 7부서 
 
 ### 새로운 기능 추가 시
 
-1. **해당 부서 폴터에 모듈 생성**
+1. **해당 부서 폴더에 모듈 생성**
 2. **단위 테스트 작성** (`tests/test_*.py`)
 3. **통합 테스트 실행**
 4. **문서화 업데이트** (`docs/`)
@@ -188,20 +275,6 @@ description: OZ_A2M (AI Agent to Market) 프로젝트 개발 가이드. 7부서 
 - Type hints 필수
 - Docstrings Google 스타일
 - 비동기 처리 (`asyncio`) 우선
-
----
-
-## 참고 리소스 (libs/)
-
-스킬의 `libs/` 폴더에 참고용 레포지토리가 클론되어 있습니다:
-
-| 레포지토리 | 용도 |
-|-----------|------|
-| `freqtrade/` | 암호화폐 트레이딩 봇 |
-| `nuclei/` | 보안 스캐닝 |
-| `netdata/` | 시스템 모니터링 |
-| `pm4py/` | 프로세스 마이닝 |
-| `TradingAgents/` | AI 트레이딩 에이전트 |
 
 ---
 

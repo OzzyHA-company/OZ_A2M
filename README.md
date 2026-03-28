@@ -30,3 +30,39 @@
 
 ### * 부록: 외부 탐색팀 (Frontline Scout)
 * **목적:** 외부 커뮤니티, SNS 등의 언더그라운드 이슈를 능동 수집하여 2번 정보검증분석센터 단방향 주입함.
+
+---
+
+## External Libraries (skills/libs/)
+
+### Trading Engines
+- **Freqtrade** - 암호화폐 트레이딩 봇
+- **Hummingbot** - 암호화폐 트레이딩 엔진
+- **QLib** - 퀀트 연구 플랫폼 (Microsoft)
+- **VectorBT** - 백테스팅 및 분석
+
+### Workflow & Orchestration
+- **Temporal** - 워크플로우 오케스트레이션
+- **CrewAI** - 멀티 에이전트 시스템
+- **Ray** - 분산 컴퓨팅
+- **Airflow** - 워크플로우 스케줄링
+
+### Data & AI
+- **yFinance** - 금융 데이터 수집
+- **VADER** - 감성 분석
+- **PM4Py** - 프로세스 마이닝
+
+### Monitoring & Observability
+- **Netdata** - 시스템 모니터링
+- **Grafana** - 시각화 대시보드
+- **Sentry** - 에러 모니터링
+- **OpenTelemetry** - 관측성 플랫폼
+
+### Integration
+- **OpenClaw** - 52개 스킬 라이브러리
+- **Pi-Mono** - 7개 패키지 개발 플랫폼
+
+### Security & Testing
+- **Nuclei** - 보안 스캐닝
+- **Hey** - HTTP 부하 테스트
+- **TradingAgents** - AI 트레이딩 에이전트
