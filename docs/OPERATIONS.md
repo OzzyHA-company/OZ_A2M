@@ -57,7 +57,7 @@
 | MQTT | 1883 | 부서 간 메시징 |
 | Temporal | 7233 | 워크플로우 오케스트레이션 |
 | Kafka | 9092 | 고우선순위 이벤트 |
-| Redis Cluster | 6379-6384 | 캐싱 및 상태 관리 |
+| Redis | 6379 | 캐싱 및 상태 관리 (oz_a2m_redis) |
 | Elasticsearch | 9200 | 로그 수집 |
 | Ray | 6379 | 분산 컴퓨팅 |
 

@@ -70,7 +70,7 @@ RAM              # 32GB (25GB 여유)
 
 ## 현재 진행 상태 (2026-03-29 기준)
 
-- OZ_A2M Phase 1~6: 완료 (13,250 라인)
-- 테스트: 100 passed / 0 failed
-- 다음 작업: `docs/BUILD_PROMPTS.md` STEP 1 부터 순차 진행
-- 최신 커밋: `172c96b` (test_audit_logger 수정)
+- OZ_A2M Phase 1~6 + STEP 1~8: **전부 완료**
+- 테스트: 267 passed / 0 failed / 16 skipped
+- `docs/BUILD_PROMPTS.md` STEP 1~8 전부 완료
+- 최신 커밋: `4bd1c06` (NoiseFilter test 파라미터 수정)

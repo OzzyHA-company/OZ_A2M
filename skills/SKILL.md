@@ -1,6 +1,6 @@
 ---
 name: oz-a2m
-version: 0.2.0
+version: 1.0.0
 description: OZ_A2M with OpenClaw + Pi-Mono + External Repos Integration. 7부서 아키텍처(관제탑, 검증분석, 보안, 유지보수, 성과분석, R&D, 데이터소스)와 Temporal, CrewAI, Ray, QLib, VectorBT, Hummingbot 등 외부 라이브러리 통합. OZ_A2M, 트레이딩 봇, 퀀트 시스템, 7부서 아키텍처, OpenClaw, Pi-Mono 언급 시 필수 참조.
 ---
 
