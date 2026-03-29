@@ -69,7 +69,7 @@ class TestNoiseFilter:
         # RSI 50에 가까운 가격 (중립)
         prices = [50000.0 + (i % 3 - 1) * 100 for i in range(20)]
 
-        result = noise_filter.filter_signal(signal, prices, volume=5000.0)
+        result = noise_filter.filter_signal(signal, prices, current_volume=5000.0)
 
         assert result.is_valid is True
         assert result.quality in [SignalQuality.EXCELLENT, SignalQuality.GOOD]
@@ -85,7 +85,7 @@ class TestNoiseFilter:
         # 계속 상승하는 가격 (과매수)
         prices = [50000.0 + i * 100 for i in range(20)]
 
-        result = noise_filter.filter_signal(signal, prices, volume=5000.0)
+        result = noise_filter.filter_signal(signal, prices, current_volume=5000.0)
 
         # 과매수 구간에서 매수는 위험
         assert result.is_valid is False or result.quality in [
@@ -101,7 +101,7 @@ class TestNoiseFilter:
         }
         prices = [50000.0] * 20
 
-        result = noise_filter.filter_signal(signal, prices, volume=100.0)
+        result = noise_filter.filter_signal(signal, prices, current_volume=100.0)
 
         # 거래량 부족으로 거부
         assert result.is_valid is False
