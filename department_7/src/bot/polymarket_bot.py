@@ -152,7 +152,8 @@ class PolymarketAIBot:
         wallet = os.environ.get("METAMASK_ADDRESS")
         api_key = os.environ.get("POLYMARKET_API_KEY")
         api_secret = os.environ.get("POLYMARKET_API_SECRET")
-        return wallet, api_key, api_secret
+        api_passphrase = os.environ.get("POLYMARKET_API_PASSPHRASE", "")
+        return wallet, api_key, api_secret, api_passphrase
 
     async def initialize(self):
         """봇 초기화"""
@@ -175,21 +176,53 @@ class PolymarketAIBot:
             self.event_bus = None
 
     async def _initialize_live(self):
-        """실제 Polymarket 연결 초기화"""
+        """실제 Polymarket 연결 초기화 (API Key + Passphrase 지원)"""
         try:
-            wallet, api_key, api_secret = self._load_credentials()
+            wallet, api_key, api_secret, api_passphrase = self._load_credentials()
 
             if not wallet:
                 logger.warning("Wallet address not found, switching to mock mode")
                 await self._initialize_mock()
                 return
 
+            # API 키가 없으면 mock 모드
+            if not api_key or not api_secret:
+                logger.warning("Polymarket API credentials not found, switching to mock mode")
+                await self._initialize_mock()
+                return
+
             self.wallet_address = wallet
 
-            # CLOB Client 초기화
+            # CLOB Client 초기화 (API Key + Passphrase 방식)
             host = "https://clob.polymarket.com"
-            creds = ApiCreds(api_key=api_key or "", api_secret=api_secret or "")
-            self.client = ClobClient(host, key=None, chain_id=137, creds=creds)
+
+            # ApiCreds with passphrase (if available)
+            if api_passphrase:
+                creds = ApiCreds(
+                    api_key=api_key,
+                    api_secret=api_secret,
+                    api_passphrase=api_passphrase
+                )
+            else:
+                # Fallback to key-only auth
+                creds = ApiCreds(api_key=api_key, api_secret=api_secret)
+
+            # Initialize client with signer
+            self.client = ClobClient(
+                host,
+                key=None,  # Private key not needed for read-only
+                chain_id=137,  # Polygon
+                creds=creds
+            )
+
+            # Test connection
+            try:
+                self.client.get_markets()
+                logger.info("Polymarket API connection successful")
+            except Exception as e:
+                logger.warning(f"Polymarket API test failed: {e}")
+                await self._initialize_mock()
+                return
 
             self.status = PolymarketStatus.RUNNING
             logger.info("Polymarket live mode initialized")

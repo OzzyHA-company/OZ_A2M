@@ -159,39 +159,56 @@ class PumpSniperBot:
             self.event_bus = None
 
     async def _initialize_live(self):
-        """실제 Helius 연결 초기화"""
-        try:
-            # WebSocket 연결
-            import websockets
+        """실제 Helius 연결 초기화 (rate limit 대응)"""
+        max_retries = 3
+        retry_delay = 3  # 3초 대기
 
-            logger.info(f"Connecting to Helius WebSocket: {self.helius_ws_url}")
-            self.helius_ws = await websockets.connect(self.helius_ws_url)
+        for attempt in range(max_retries):
+            try:
+                # rate limit 방지를 위한 대기
+                if attempt > 0:
+                    logger.info(f"Retrying Helius connection in {retry_delay}s... (attempt {attempt + 1}/{max_retries})")
+                    await asyncio.sleep(retry_delay)
 
-            # Pump.fun 프로그램 구독
-            pump_fun_program = "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P"
-            subscribe_msg = {
-                "jsonrpc": "2.0",
-                "id": 1,
-                "method": "programSubscribe",
-                "params": [pump_fun_program, {"encoding": "jsonParsed"}]
-            }
-            await self.helius_ws.send(json.dumps(subscribe_msg))
+                # WebSocket 연결
+                import websockets
 
-            self.status = SniperStatus.RUNNING
-            logger.info("Pump.fun sniper live mode initialized")
+                logger.info(f"Connecting to Helius WebSocket: {self.helius_ws_url}")
+                self.helius_ws = await websockets.connect(
+                    self.helius_ws_url,
+                    ping_interval=20,
+                    ping_timeout=10
+                )
 
-            # 시작 알림
-            await self._send_telegram_notification(
-                f"🚀 Pump.fun 스나이퍼 시작\n"
-                f"자본: {self.capital_sol} SOL\n"
-                f"익절: {self.take_profit_low}~{self.take_profit_high}x\n"
-                f"손절: -{self.stop_loss * 100}%"
-            )
+                # Pump.fun 프로그램 구독
+                pump_fun_program = "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P"
+                subscribe_msg = {
+                    "jsonrpc": "2.0",
+                    "id": 1,
+                    "method": "programSubscribe",
+                    "params": [pump_fun_program, {"encoding": "jsonParsed"}]
+                }
+                await self.helius_ws.send(json.dumps(subscribe_msg))
 
-        except Exception as e:
-            logger.error(f"Failed to initialize Helius connection: {e}")
-            logger.info("Falling back to mock mode")
-            await self._initialize_mock()
+                self.status = SniperStatus.RUNNING
+                logger.info("Pump.fun sniper live mode initialized")
+
+                # 시작 알림
+                await self._send_telegram_notification(
+                    f"🚀 Pump.fun 스나이퍼 시작\n"
+                    f"자본: {self.capital_sol} SOL\n"
+                    f"익절: {self.take_profit_low}~{self.take_profit_high}x\n"
+                    f"손절: -{self.stop_loss * 100}%"
+                )
+                return
+
+            except Exception as e:
+                logger.error(f"Failed to initialize Helius connection (attempt {attempt + 1}/{max_retries}): {e}")
+                if attempt < max_retries - 1:
+                    retry_delay *= 2  # 지수 백오프
+                else:
+                    logger.info("Falling back to mock mode")
+                    await self._initialize_mock()
 
     async def _initialize_mock(self):
         """Mock 모드 초기화"""
