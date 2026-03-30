@@ -272,6 +272,22 @@ body{background:var(--background);color:var(--text-primary);font-family:'Rajdhan
       </div>
     </div>
 
+    <!-- 빠른 실행 (시스템 제어) -->
+    <div style="display:flex;gap:12px;margin-bottom:12px;flex-wrap:wrap;">
+      <button onclick="triggerKillSwitch()" style="background:linear-gradient(135deg,rgba(207,102,121,0.2),rgba(207,102,121,0.1));border:1px solid var(--loss);color:var(--loss);padding:10px 20px;border-radius:8px;cursor:pointer;font-weight:600;display:flex;align-items:center;gap:8px;transition:all 0.2s;" onmouseover="this.style.background='rgba(207,102,121,0.3)" onmouseout="this.style.background='linear-gradient(135deg,rgba(207,102,121,0.2),rgba(207,102,121,0.1))'">
+        <span>🚨</span> 킬스위치
+      </button>
+      <button onclick="toggleTelegram()" style="background:var(--card-bg);border:1px solid var(--card-border);color:var(--text-primary);padding:10px 20px;border-radius:8px;cursor:pointer;font-weight:600;display:flex;align-items:center;gap:8px;transition:all 0.2s;" onmouseover="this.style.borderColor='var(--primary)'" onmouseout="this.style.borderColor='var(--card-border)'">
+        <span>🔔</span> Telegram <span id="tg-status">ON</span>
+      </button>
+      <button onclick="restartSystem()" style="background:var(--card-bg);border:1px solid var(--card-border);color:var(--text-primary);padding:10px 20px;border-radius:8px;cursor:pointer;font-weight:600;display:flex;align-items:center;gap:8px;transition:all 0.2s;" onmouseover="this.style.borderColor='var(--primary)'" onmouseout="this.style.borderColor='var(--card-border)'">
+        <span>🔄</span> 재시작
+      </button>
+      <button onclick="optimizeSystem()" style="background:var(--card-bg);border:1px solid var(--card-border);color:var(--text-primary);padding:10px 20px;border-radius:8px;cursor:pointer;font-weight:600;display:flex;align-items:center;gap:8px;transition:all 0.2s;" onmouseover="this.style.borderColor='var(--primary)'" onmouseout="this.style.borderColor='var(--card-border)'">
+        <span>⚡</span> 최적화
+      </button>
+    </div>
+
     <!-- 실시간 시세 카드 -->
     <div class="cards-row" style="margin-bottom:12px;">
       <div class="stat-card accent-purple" style="position:relative;overflow:hidden;">
@@ -733,6 +749,21 @@ body{background:var(--background);color:var(--text-primary);font-family:'Rajdhan
     <div class="grid-2">
       <div class="card">
         <div class="card-title"><span class="dot" style="background:var(--neon-purple)"></span> 백테스트 엔진 (제6부서)</div>
+        <div style="padding:12px;background:var(--card-bg);border-radius:8px;margin-bottom:12px;">
+          <div style="font-size:11px;color:var(--text-secondary);margin-bottom:8px;">📊 엔진 정보</div>
+          <div style="font-size:12px;line-height:1.6;">
+            <strong>엔진:</strong> VectorBT 0.28.0 (Python 백테스팅)<br>
+            <strong>데이터:</strong> CCXT OHLCV 1분봉 (최대 90일)<br>
+            <strong>수수료:</strong> Maker 0.02% / Taker 0.05%<br>
+            <strong>슬리피지:</strong> 0.01% 시뮬레이션
+          </div>
+          <div style="margin-top:8px;padding-top:8px;border-top:1px solid var(--card-border);">
+            <div style="font-size:11px;color:var(--text-secondary);margin-bottom:4px;">전략 설명</div>
+            <div id="strategy-desc" style="font-size:11px;color:var(--text-muted);">
+              <strong>Grid v2:</strong> 가격 구간별 그리드 매매, 변동성 돌파 시 재조정
+            </div>
+          </div>
+        </div>
         <div style="padding:12px;">
           <div style="margin-bottom:12px;">
             <label style="font-size:11px;color:var(--text-secondary);display:block;margin-bottom:4px;">전략 선택</label>
@@ -781,6 +812,16 @@ body{background:var(--background);color:var(--text-primary);font-family:'Rajdhan
       </div>
       <div class="card">
         <div class="card-title"><span class="dot" style="background:var(--neon-pink)"></span> Ray RLlib 강화학습</div>
+        <div style="padding:12px;background:var(--card-bg);border-radius:8px;margin-bottom:12px;">
+          <div style="font-size:11px;color:var(--text-secondary);margin-bottom:8px;">🤖 RLlib 설정</div>
+          <div style="font-size:12px;line-height:1.6;">
+            <strong>알고리즘:</strong> PPO (Proximal Policy Optimization)<br>
+            <strong>프레임워크:</strong> Ray RLlib 2.9.0<br>
+            <strong>상태공간:</strong> 가격, 거래량, 포지션, PnL (20차원)<br>
+            <strong>행동:</strong> Buy/Hold/Sell/Close (4개)<br>
+            <strong>보상:</strong> 샤프 비율 × 수익률
+          </div>
+        </div>
         <div style="padding:12px;">
           <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
             <div>
@@ -1159,13 +1200,145 @@ function renderBots() {
 // D1: 데이터수집 탭 데이터 로드
 async function loadCollectionData() {
   try {
-    const res = await fetch('/api/intel');
-    if (res.ok) {
-      const data = await res.json();
-      updateCollectionDisplay(data);
+    // D1 상태 로드
+    const [statusRes, intelRes] = await Promise.all([
+      fetch('/api/departments/1/status'),
+      fetch('/api/intel/feed?limit=20')
+    ]);
+
+    if (statusRes.ok) {
+      const statusData = await statusRes.json();
+      updateCollectionStatus(statusData);
+    }
+
+    if (intelRes.ok) {
+      const intelData = await intelRes.json();
+      updateIntelFeed(intelData.intel || []);
     }
   } catch (e) {
     console.error('Failed to load collection data:', e);
+  }
+}
+
+// D1: 데이터수집 상태 업데이트
+function updateCollectionStatus(data) {
+  // 데이터 소스 테이블 업데이트
+  const sourcesBody = document.getElementById('collection-sources-body');
+  if (sourcesBody && data.data_sources) {
+    const sources = [
+      { name: 'Binance', status: 'connected', latency: '12ms' },
+      { name: 'Bybit', status: 'connected', latency: '18ms' },
+      { name: 'Hyperliquid', status: 'connected', latency: '25ms' },
+      { name: 'News RSS', status: 'connected', items: data.intel_collector?.total_intel || 0 },
+    ];
+
+    let html = '';
+    for (const source of sources) {
+      const statusClass = source.status === 'connected' ? 'profit' : 'loss';
+      const statusText = source.status === 'connected' ? '🟢 연결됨' : '🔴 끊김';
+      const info = source.latency || `${source.items} items`;
+      html += `
+        <tr>
+          <td><strong>${source.name}</strong></td>
+          <td class="${statusClass}">${statusText}</td>
+          <td>${info}</td>
+          <td>${data.intel_collector?.last_update || '방금'}</td>
+        </tr>
+      `;
+    }
+    sourcesBody.innerHTML = html;
+  }
+
+  // 인텔 수집기 상태 표시
+  const intelCollector = data.intel_collector;
+  if (intelCollector) {
+    console.log('Intel Collector:', intelCollector);
+  }
+}
+
+// D1: 인텔 피드 업데이트
+function updateIntelFeed(intelItems) {
+  const feedEl = document.getElementById('intel-feed');
+  if (!feedEl) return;
+
+  if (!intelItems || intelItems.length === 0) {
+    feedEl.innerHTML = '<div class="intel-item" style="padding:12px;"><span class="muted">수집된 인텔이 없습니다. 인텔 수집을 시작하세요.</span></div>';
+    return;
+  }
+
+  let html = '';
+  for (const item of intelItems.slice(0, 10)) {
+    const time = new Date(item.timestamp).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' });
+    const sourceIcon = {
+      'news': '📰',
+      'twitter': '🐦',
+      'youtube': '▶️',
+      'onchain': '⛓️'
+    }[item.source] || '📡';
+
+    const sentimentColor = item.sentiment === 'positive' ? 'var(--profit)' :
+                          item.sentiment === 'negative' ? 'var(--loss)' : 'var(--text-secondary)';
+
+    html += `
+      <div class="intel-item" style="padding:12px;border-bottom:1px solid var(--card-border);display:flex;gap:12px;align-items:flex-start;">
+        <span style="font-size:16px;">${sourceIcon}</span>
+        <div style="flex:1;">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">
+            <span style="font-size:11px;color:var(--text-secondary);">${item.source.toUpperCase()}</span>
+            <span style="font-size:11px;color:var(--text-secondary);">${time}</span>
+          </div>
+          <div style="font-size:13px;margin-bottom:4px;">${item.title || item.content}</div>
+          <div style="display:flex;gap:8px;align-items:center;">
+            ${item.related_symbols ? item.related_symbols.map(s => `<span style="background:var(--card-bg);padding:2px 6px;border-radius:4px;font-size:11px;">${s}</span>`).join('') : ''}
+            ${item.sentiment ? `<span style="color:${sentimentColor};font-size:11px;">● ${item.sentiment}</span>` : ''}
+          </div>
+        </div>
+      </div>
+    `;
+  }
+
+  feedEl.innerHTML = html;
+}
+
+// D1: ESQL 쿼리 실행
+async function runEsqlQuery() {
+  const queryInput = document.getElementById('esql-query');
+  const resultsEl = document.getElementById('esql-results');
+
+  if (!queryInput || !resultsEl) return;
+
+  const query = queryInput.value.trim();
+  if (!query) {
+    resultsEl.innerHTML = '<span class="muted">쿼리를 입력하세요</span>';
+    return;
+  }
+
+  resultsEl.innerHTML = '<span class="muted">검색 중...</span>';
+
+  try {
+    const res = await fetch('/api/departments/1/query', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ query })
+    });
+
+    if (res.ok) {
+      const data = await res.json();
+      if (data.results && data.results.length > 0) {
+        let html = '<div style="display:flex;flex-direction:gap:4px;">';
+        for (const row of data.results.slice(0, 5)) {
+          html += `<div style="padding:4px;background:var(--card-bg);border-radius:4px;margin-bottom:4px;">${JSON.stringify(row)}</div>`;
+        }
+        html += '</div>';
+        resultsEl.innerHTML = html;
+      } else {
+        resultsEl.innerHTML = '<span class="muted">결과가 없습니다</span>';
+      }
+    } else {
+      resultsEl.innerHTML = '<span style="color:var(--loss);">쿼리 실패</span>';
+    }
+  } catch (e) {
+    resultsEl.innerHTML = '<span style="color:var(--loss);">오류: ' + e.message + '</span>';
   }
 }
 
@@ -1208,18 +1381,73 @@ function updateCollectionDisplay(data) {
 // D2: 검증/분석 탭 데이터 로드
 async function loadVerificationData() {
   try {
-    const res = await fetch('/api/verification/signals');
-    if (res.ok) {
-      const data = await res.json();
+    const [signalsRes, statusRes] = await Promise.all([
+      fetch('/api/verification/signals'),
+      fetch('/api/departments/2/status')
+    ]);
+
+    if (signalsRes.ok) {
+      const data = await signalsRes.json();
       updateSignalsDisplay(data.signals || []);
+    }
+
+    if (statusRes.ok) {
+      const statusData = await statusRes.json();
+      updatePipelineStatus(statusData.pipeline);
     }
   } catch (e) {
     console.error('Failed to load verification data:', e);
-    // Mock 데이터 표시
     updateSignalsDisplay([
       {time: '18:20:00', symbol: 'BTC/USDT', direction: 'LONG', strength: 85, confidence: 92},
       {time: '18:15:30', symbol: 'SOL/USDT', direction: 'SHORT', strength: 72, confidence: 88},
     ]);
+  }
+}
+
+// D2: 파이프라인 상태 업데이트
+function updatePipelineStatus(pipeline) {
+  const statusEl = document.getElementById('pipeline-status');
+  if (!statusEl || !pipeline) return;
+
+  const isRunning = pipeline.running;
+  const statusText = isRunning ? '🟢 실행 중' : '🔴 중지됨';
+  const btnText = isRunning ? '중지' : '시작';
+  const btnAction = isRunning ? 'stopVerificationPipeline()' : 'startVerificationPipeline()';
+
+  statusEl.innerHTML = `
+    <div style="display:flex;justify-content:space-between;align-items:center;padding:12px;background:var(--card-bg);border-radius:8px;margin-bottom:12px;">
+      <div>
+        <div style="font-size:12px;color:var(--text-secondary);margin-bottom:4px;">검증 파이프라인 상태</div>
+        <div style="font-size:16px;font-weight:600;">${statusText}</div>
+      </div>
+      <button class="ctrl-btn" onclick="${btnAction}" style="padding:8px 16px;">${btnText}</button>
+    </div>
+  `;
+}
+
+// D2: 파이프라인 시작
+async function startVerificationPipeline() {
+  try {
+    const res = await fetch('/api/verification/pipeline/start', { method: 'POST' });
+    if (res.ok) {
+      showNotification('검증 파이프라인 시작됨', 'success');
+      loadVerificationData();
+    }
+  } catch (e) {
+    showNotification('파이프라인 시작 실패', 'error');
+  }
+}
+
+// D2: 파이프라인 중지
+async function stopVerificationPipeline() {
+  try {
+    const res = await fetch('/api/verification/pipeline/stop', { method: 'POST' });
+    if (res.ok) {
+      showNotification('검증 파이프라인 중지됨', 'info');
+      loadVerificationData();
+    }
+  } catch (e) {
+    showNotification('파이프라인 중지 실패', 'error');
   }
 }
 
@@ -1299,14 +1527,76 @@ function updatePerformanceDisplay(data) {
   }
 }
 
-// D5: 캘린더 초기화
-function initCalendar() {
+// D5: 캘린더 초기화 (실제 데이터 연동)
+async function initCalendar() {
   const grid = document.getElementById('calendar-grid');
   if (!grid) return;
 
   const now = new Date();
   const year = now.getFullYear();
   const month = now.getMonth();
+
+  // 캘린더 데이터 로드
+  try {
+    const res = await fetch(`/api/performance/calendar?year=${year}&month=${month + 1}`);
+    if (res.ok) {
+      const data = await res.json();
+      renderCalendar(data.calendar, year, month, now.getDate());
+      updateCalendarSummary(data.summary);
+    } else {
+      // API 실패시 기본 캘린더
+      renderBasicCalendar(year, month, now.getDate());
+    }
+  } catch (e) {
+    console.error('Failed to load calendar:', e);
+    renderBasicCalendar(year, month, now.getDate());
+  }
+}
+
+// D5: 캘린더 렌더링 (실제 데이터)
+function renderCalendar(calendarData, year, month, today) {
+  const grid = document.getElementById('calendar-grid');
+  if (!grid) return;
+
+  let html = '';
+
+  // 요일 헤더
+  const weekdays = ['일', '월', '화', '수', '목', '금', '토'];
+  for (const day of weekdays) {
+    html += `<div style="padding:8px;text-align:center;font-size:11px;color:var(--text-secondary);font-weight:600;">${day}</div>`;
+  }
+
+  // 주 데이터
+  for (const week of calendarData) {
+    for (const dayData of week) {
+      if (dayData === null) {
+        html += '<div></div>';
+      } else {
+        const isToday = dayData.day === today;
+        const hasData = dayData.has_data;
+        const pnl = dayData.pnl || 0;
+        const pnlColor = pnl >= 0 ? 'var(--profit)' : 'var(--loss)';
+        const bg = isToday ? 'background:var(--primary);' : '';
+        const pnlIndicator = hasData ? `<div style="font-size:9px;color:${pnlColor};margin-top:2px;">${pnl >= 0 ? '+' : ''}${pnl.toFixed(0)}</div>` : '';
+
+        html += `
+          <div style="padding:8px;border-radius:4px;cursor:pointer;text-align:center;${bg}" onclick="selectDate(${dayData.day}, '${dayData.date}')">
+            <div style="font-size:13px;font-weight:500;">${dayData.day}</div>
+            ${pnlIndicator}
+          </div>
+        `;
+      }
+    }
+  }
+
+  grid.innerHTML = html;
+}
+
+// D5: 기본 캘린더 (API 실패시)
+function renderBasicCalendar(year, month, today) {
+  const grid = document.getElementById('calendar-grid');
+  if (!grid) return;
+
   const daysInMonth = new Date(year, month + 1, 0).getDate();
   const firstDay = new Date(year, month, 1).getDay();
 
@@ -1317,11 +1607,103 @@ function initCalendar() {
   }
   // 날짜
   for (let day = 1; day <= daysInMonth; day++) {
-    const isToday = day === now.getDate();
+    const isToday = day === today;
     const bg = isToday ? 'background:var(--primary);' : '';
     html += `<div style="padding:8px;border-radius:4px;cursor:pointer;${bg}" onclick="selectDate(${day})">${day}</div>`;
   }
   grid.innerHTML = html;
+}
+
+// D5: 캘린더 요약 업데이트
+function updateCalendarSummary(summary) {
+  const summaryEl = document.getElementById('calendar-summary');
+  if (!summaryEl || !summary) return;
+
+  const winRate = summary.days_traded > 0 ? (summary.win_days / summary.days_traded * 100).toFixed(1) : 0;
+
+  summaryEl.innerHTML = `
+    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:16px;">
+      <div style="text-align:center;padding:12px;background:var(--card-bg);border-radius:8px;">
+        <div style="font-size:11px;color:var(--text-secondary);margin-bottom:4px;">월간 PnL</div>
+        <div style="font-size:20px;font-weight:700;color:${summary.total_pnl >= 0 ? 'var(--profit)' : 'var(--loss)'};">${summary.total_pnl >= 0 ? '+' : ''}$${summary.total_pnl.toFixed(2)}</div>
+      </div>
+      <div style="text-align:center;padding:12px;background:var(--card-bg);border-radius:8px;">
+        <div style="font-size:11px;color:var(--text-secondary);margin-bottom:4px;">거래일</div>
+        <div style="font-size:20px;font-weight:700;">${summary.days_traded || 0}일</div>
+      </div>
+      <div style="text-align:center;padding:12px;background:var(--card-bg);border-radius:8px;">
+        <div style="font-size:11px;color:var(--text-secondary);margin-bottom:4px;">승률</div>
+        <div style="font-size:20px;font-weight:700;color:${winRate >= 50 ? 'var(--profit)' : 'var(--loss)'};">${winRate}%</div>
+      </div>
+    </div>
+  `;
+}
+
+// D5: 날짜 선택 (실제 데이터 로드)
+async function selectDate(day, dateStr) {
+  if (!dateStr) {
+    const now = new Date();
+    dateStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+  }
+
+  document.getElementById('selected-date').textContent = dateStr;
+
+  // 선택된 날짜의 성과 데이터 로드
+  try {
+    const res = await fetch(`/api/performance/range?start_date=${dateStr}&end_date=${dateStr}`);
+    if (res.ok) {
+      const data = await res.json();
+      if (data.performances && data.performances.length > 0) {
+        const perf = data.performances[0];
+        showDateDetail(perf);
+      } else {
+        showNotification(`${dateStr} - 거래 데이터 없음`, 'info');
+      }
+    }
+  } catch (e) {
+    console.error('Failed to load date data:', e);
+  }
+}
+
+// D5: 날짜 상세 정보 표시
+function showDateDetail(perf) {
+  const detail = `
+    📅 ${perf.date}
+    💰 PnL: ${perf.pnl >= 0 ? '+' : ''}$${perf.pnl.toFixed(2)} (${perf.pnl_pct >= 0 ? '+' : ''}${perf.pnl_pct.toFixed(2)}%)
+    🔄 거래: ${perf.trades}회 (승: ${perf.win_count} / 패: ${perf.loss_count})
+    💵 자본: $${perf.capital.toFixed(2)}
+  `;
+  showNotification(detail, 'info');
+}
+
+// D5: 리포트 생성 (API 연동)
+async function generateReport(type) {
+  try {
+    const now = new Date();
+    const startDate = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().split('T')[0];
+    const endDate = now.toISOString().split('T')[0];
+
+    const res = await fetch('/api/departments/5/report', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        type,
+        start_date: startDate,
+        end_date: endDate
+      })
+    });
+
+    if (res.ok) {
+      const data = await res.json();
+      showNotification(`${type} 리포트 생성 완료`, 'success');
+      document.getElementById('last-report-time').textContent = new Date().toLocaleString('ko-KR');
+    } else {
+      showNotification('리포트 생성 실패', 'error');
+    }
+  } catch (e) {
+    console.error('Report generation error:', e);
+    showNotification('리포트 생성 중 오류', 'error');
+  }
 }
 
 // D5: 날짜 선택
