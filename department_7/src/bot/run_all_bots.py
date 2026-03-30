@@ -13,6 +13,10 @@ import signal
 from pathlib import Path
 from datetime import datetime
 
+# 환경변수 로드 (API 키 등) - 기존 환경변수 덮어쓰기
+from dotenv import load_dotenv
+load_dotenv('/home/ozzy-claw/.ozzy-secrets/master.env', override=True)
+
 project_root = Path(__file__).parent.parent.parent.parent
 sys.path.insert(0, str(project_root))
 
@@ -46,7 +50,7 @@ BOT_CONFIGS = [
         'class': BinanceGridBot,
         'kwargs': {
             'bot_id': 'grid_binance_001',
-            'symbol': 'BTC/USDT',
+            'symbol': 'SOL/USDT',
             'exchange_id': 'binance',
             'capital': 11.0,
             'grid_count': 20,
@@ -62,7 +66,7 @@ BOT_CONFIGS = [
         'class': BinanceDCABot,
         'kwargs': {
             'bot_id': 'dca_binance_001',
-            'symbol': 'BTC/USDT',
+            'symbol': 'SOL/USDT',
             'exchange_id': 'binance',
             'capital': 14.0,
             'dca_drop_pct': 0.02,

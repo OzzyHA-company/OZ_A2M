@@ -1,6 +1,6 @@
 """
-Triangular Arbitrage Bot - 삼각 아비트라지 봇
-STEP 11: OZ_A2M 완결판
+Triangular Arbitrage Bot - 삼각 아비트라지 봇 (Fixed async/await)
+STEP 11: OZ_A2M 완결판 - Fixed Version
 
 설정:
 - 거래소: Binance
@@ -9,6 +9,11 @@ STEP 11: OZ_A2M 완결판
 - 수수료 자동 계산
 - 자본: $10.35
 - sandbox: False (실거래)
+
+Fixes:
+- CCXT async_support 적용
+- async/await 패턴 전체 재구조화
+- Market precision 적용
 """
 
 import asyncio
@@ -17,10 +22,10 @@ import os
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Dict, List, Optional, Any, Callable, Tuple
-from decimal import Decimal
+from decimal import Decimal, ROUND_DOWN
 from enum import Enum
 
-import ccxt
+import ccxt.async_support as ccxt
 
 import sys
 from pathlib import Path
@@ -67,13 +72,18 @@ class ArbTrade:
 
 class TriangularArbBot:
     """
-    삼각 아비트라지 봇
+    삼각 아비트라지 봇 (Fixed async/await)
 
     전략:
     - 세 개의 거래쌍을 통해 순환 거래
     - BTC → ETH → BNB → BTC
     - 수수료 고려 후 0.1% 이상 수익 시 실행
+    - CCXT async 지원 패턴 적용
     """
+
+    # Binance Spot 최소 주문금액 (USDT 기준)
+    MIN_NOTIONAL_USDT = 10.0
+    SAFETY_MARGIN = 1.1
 
     def __init__(
         self,
@@ -102,6 +112,7 @@ class TriangularArbBot:
         self.exchange: Optional[ccxt.Exchange] = None
         self.tickers: Dict[str, Dict] = {}
         self.trades: List[ArbTrade] = []
+        self.market_info: Dict[str, Dict] = {}
 
         # 아비트라지 경로 설정
         self.full_path = [base_currency] + self.arb_path + [base_currency]
@@ -162,7 +173,7 @@ class TriangularArbBot:
             self.status = ArbStatus.ERROR
             return
 
-        # 거래소 설정
+        # 거래소 설정 (async_support 사용)
         exchange_class = getattr(ccxt, self.exchange_id)
         config = {
             "apiKey": api_key,
@@ -174,10 +185,17 @@ class TriangularArbBot:
         self.exchange = exchange_class(config)
 
         if self.sandbox:
-            self.exchange.set_sandbox_mode(True)
+            await self.exchange.set_sandbox_mode(True)
 
         # 마켓 로드
         await self.exchange.load_markets()
+
+        # 각 심볼의 마켓 정보 저장
+        for symbol in self.symbols:
+            try:
+                self.market_info[symbol] = self.exchange.market(symbol)
+            except Exception as e:
+                logger.warning(f"Could not load market info for {symbol}: {e}")
 
         # EventBus 연결
         try:
@@ -198,6 +216,31 @@ class TriangularArbBot:
             f"최소 수익: {self.min_profit_pct * 100}%\n"
             f"자본: ${self.capital}"
         )
+
+    def _amount_to_precision(self, symbol: str, amount: float) -> float:
+        """수량을 거래소 정밀도에 맞게 조정"""
+        if symbol in self.market_info:
+            precision = self.market_info[symbol]["precision"].get("amount", 6)
+        else:
+            precision = 6
+        quantizer = Decimal(10) ** -Decimal(precision)
+        return float(Decimal(str(amount)).quantize(quantizer, rounding=ROUND_DOWN))
+
+    def _price_to_precision(self, symbol: str, price: float) -> float:
+        """가격을 거래소 정밀도에 맞게 조정"""
+        if symbol in self.market_info:
+            precision = self.market_info[symbol]["precision"].get("price", 2)
+        else:
+            precision = 2
+        quantizer = Decimal(10) ** -Decimal(precision)
+        return float(Decimal(str(price)).quantize(quantizer, rounding=ROUND_DOWN))
+
+    def _get_min_notional(self, symbol: str) -> float:
+        """심볼의 최소 주문 금액 조회"""
+        if symbol in self.market_info:
+            limits = self.market_info[symbol].get("limits", {})
+            return limits.get("cost", {}).get("min", self.MIN_NOTIONAL_USDT)
+        return self.MIN_NOTIONAL_USDT
 
     async def run(self):
         """메인 루프"""
@@ -303,19 +346,29 @@ class TriangularArbBot:
     async def _validate_opportunity(self, opportunity: ArbOpportunity) -> bool:
         """아비트라지 기회 검증"""
         try:
-            # Signal Generator를 통한 검증
-            signal = await self.signal_generator.generate_signal({
-                "type": "triangular_arbitrage",
-                "path": opportunity.path,
-                "profit_pct": opportunity.profit_pct,
-                "symbols": opportunity.symbols
-            })
+            # 기본 검증: 수익률이 최소 기준 이상인지
+            if opportunity.profit_pct < self.min_profit_pct:
+                return False
 
-            if signal and signal.get("valid", False):
-                return True
+            # 추가 검증: 시장 데이터 신선도 확인
+            for symbol in opportunity.symbols:
+                if symbol not in self.tickers:
+                    return False
+                # 60초 이내 데이터인지 확인
+                ticker_timestamp = self.tickers[symbol].get('timestamp', 0)
+                if ticker_timestamp:
+                    if (datetime.utcnow().timestamp() - ticker_timestamp / 1000) > 60:
+                        logger.debug(f"Stale ticker data for {symbol}")
+                        return False
 
-            logger.debug(f"Opportunity validation failed: {opportunity}")
-            return False
+            # 최소 주문 금액 검증
+            for symbol in opportunity.symbols:
+                min_notional = self._get_min_notional(symbol)
+                if self.capital < min_notional * self.SAFETY_MARGIN:
+                    logger.warning(f"Capital ${self.capital} below minimum for {symbol}")
+                    return False
+
+            return True
 
         except Exception as e:
             logger.error(f"Error validating opportunity: {e}")
@@ -325,27 +378,28 @@ class TriangularArbBot:
         """아비트라지 실행"""
         try:
             # 첫 번째 거래: BTC -> ETH
-            amount1 = self.capital / self.tickers[self.symbols[0]]["ask"]
-            order1 = await self.exchange.create_market_buy_order(
-                self.symbols[0], amount1
-            )
+            symbol1 = self.symbols[0]
+            amount1 = self._amount_to_precision(symbol1, self.capital / self.tickers[symbol1]["ask"])
+            order1 = await self.exchange.create_market_buy_order(symbol1, amount1)
+            logger.info(f"Step 1: Bought {amount1} {symbol1.split('/')[1]} @ {self.tickers[symbol1]['ask']}")
 
             # 두 번째 거래: ETH -> BNB
-            amount2 = amount1 / self.tickers[self.symbols[1]]["ask"]
-            order2 = await self.exchange.create_market_buy_order(
-                self.symbols[1], amount2
-            )
+            symbol2 = self.symbols[1]
+            amount2 = self._amount_to_precision(symbol2, amount1 / self.tickers[symbol2]["ask"])
+            order2 = await self.exchange.create_market_buy_order(symbol2, amount2)
+            logger.info(f"Step 2: Bought {amount2} {symbol2.split('/')[1]} @ {self.tickers[symbol2]['ask']}")
 
             # 세 번째 거래: BNB -> BTC
-            amount3 = amount2 / self.tickers[self.symbols[2]]["ask"]
-            order3 = await self.exchange.create_market_buy_order(
-                self.symbols[2], amount3
-            )
+            symbol3 = self.symbols[2]
+            amount3 = self._amount_to_precision(symbol3, amount2 / self.tickers[symbol3]["ask"])
+            order3 = await self.exchange.create_market_buy_order(symbol3, amount3)
+            logger.info(f"Step 3: Bought {amount3} {symbol3.split('/')[1]} @ {self.tickers[symbol3]['ask']}")
 
             # 수익 계산
             final_btc = amount3
-            profit = final_btc - (self.capital / self.tickers[self.symbols[0]]["ask"])
-            profit_pct = profit / (self.capital / self.tickers[self.symbols[0]]["ask"])
+            initial_btc = self.capital / self.tickers[symbol1]["ask"]
+            profit = final_btc - initial_btc
+            profit_pct = profit / initial_btc if initial_btc > 0 else 0
 
             # 거래 기록
             trade = ArbTrade(
@@ -377,6 +431,10 @@ class TriangularArbBot:
             if self.on_trade:
                 self.on_trade(trade)
 
+        except ccxt.InsufficientFunds as e:
+            logger.error(f"Insufficient funds for arbitrage: {e}")
+        except ccxt.InvalidOrder as e:
+            logger.error(f"Invalid order in arbitrage: {e}")
         except Exception as e:
             logger.error(f"Failed to execute arbitrage: {e}")
 

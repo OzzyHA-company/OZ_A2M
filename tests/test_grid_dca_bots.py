@@ -92,9 +92,10 @@ class TestBinanceGridBot:
 
     def test_order_amount_calculation(self):
         """주문 수량 계산 테스트"""
+        # NOTIONAL 제한을 고려한 충분한 자본 설정 ($11 * 10그리드 * 1.1 margin = $121 이상)
         bot = BinanceGridBot(
             bot_id="grid_test",
-            capital=11.0,
+            capital=150.0,
             grid_count=10,
             sandbox=True,
             telegram_alerts=False
@@ -103,7 +104,8 @@ class TestBinanceGridBot:
         bot.current_price = 50000.0
         amount = bot._calculate_order_amount()
 
-        expected = (11.0 / 10) / 50000.0
+        # 각 그리드당 $15 ($150 / 10) → $15 / $50000 = 0.0003 BTC
+        expected = (150.0 / 10) / 50000.0
         assert amount == pytest.approx(expected, rel=1e-6)
 
     def test_grid_status(self):

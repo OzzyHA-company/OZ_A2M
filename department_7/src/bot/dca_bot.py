@@ -1,6 +1,6 @@
 """
-Binance DCA Bot - 바이낸스 DCA (Dollar Cost Averaging) 봇
-STEP 10: OZ_A2M 완결판
+Binance DCA Bot - 바이낸스 DCA (Dollar Cost Averaging) 봇 (Fixed for NOTIONAL errors)
+STEP 10: OZ_A2M 완결판 - Fixed Version
 
 설정:
 - 거래소: Binance
@@ -9,6 +9,11 @@ STEP 10: OZ_A2M 완결판
 - 반등 +3% 익절
 - 자본: $14
 - sandbox: False (실거래)
+
+Fixes:
+- Binance 최소 주문금액(NOTIONAL) 자동 계산
+- amount_to_precision / price_to_precision 적용
+- CCXT async 지원 패턴 적용
 """
 
 import asyncio
@@ -17,7 +22,7 @@ import os
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Dict, List, Optional, Any, Callable
-from decimal import Decimal
+from decimal import Decimal, ROUND_DOWN
 from enum import Enum
 
 import ccxt.async_support as ccxt
@@ -72,13 +77,18 @@ class DCATrade:
 
 class BinanceDCABot:
     """
-    Binance DCA (Dollar Cost Averaging) 봇
+    Binance DCA (Dollar Cost Averaging) 봇 (Fixed for NOTIONAL errors)
 
     전략:
     - 초기 매수 후 가격이 -2% 하락할 때마다 추가 매수
     - 평균 매수가 기준 +3% 반등 시 전량 익절
     - 리스크 분산을 위한 분할 매수
+    - Binance 최소 주문금액 자동 계산
     """
+
+    # Binance Spot 최소 주문금액 (USDT 기준)
+    MIN_NOTIONAL_USDT = 10.0  # $10 minimum for most pairs
+    SAFETY_MARGIN = 1.1  # 10% safety margin
 
     def __init__(
         self,
@@ -114,6 +124,10 @@ class BinanceDCABot:
 
         # 거래소
         self.exchange: Optional[ccxt.Exchange] = None
+        self.market_info: Optional[Dict] = None
+        self.precision: Dict[str, int] = {"amount": 6, "price": 2}
+        self.min_amount: float = 0.00001
+        self.min_notional: float = self.MIN_NOTIONAL_USDT
 
         # MQTT
         mqtt_config = MQTTConfig(host=mqtt_host, port=mqtt_port, client_id=bot_id)
@@ -167,10 +181,22 @@ class BinanceDCABot:
         self.exchange = exchange_class(config)
 
         if self.sandbox:
-            self.exchange.set_sandbox_mode(True)
+            await self.exchange.set_sandbox_mode(True)
 
         # 마켓 로드
         await self.exchange.load_markets()
+        self.market_info = self.exchange.market(self.symbol)
+
+        # 마켓 정보 추출 (precision, limits)
+        if self.market_info:
+            self.precision["amount"] = self.market_info["precision"].get("amount", 6)
+            self.precision["price"] = self.market_info["precision"].get("price", 2)
+            limits = self.market_info.get("limits", {})
+            self.min_amount = limits.get("amount", {}).get("min", 0.00001)
+            self.min_notional = limits.get("cost", {}).get("min", self.MIN_NOTIONAL_USDT)
+
+        logger.info(f"Market info loaded: precision={self.precision}, "
+                   f"min_amount={self.min_amount}, min_notional={self.min_notional}")
 
         # 현재가 조회
         ticker = await self.exchange.fetch_ticker(self.symbol)
@@ -195,8 +221,78 @@ class BinanceDCABot:
             f"현재가: ${self.current_price:.2f}\n"
             f"DCA 조건: -{self.dca_drop_pct*100}%\n"
             f"익절 조건: +{self.take_profit_pct*100}%\n"
-            f"자본: ${self.capital}"
+            f"자본: ${self.capital}\n"
+            f"최소주문: ${self.min_notional * self.SAFETY_MARGIN:.2f}"
         )
+
+    def _amount_to_precision(self, amount: float) -> float:
+        """수량을 거래소 정밀도에 맞게 조정"""
+        precision = self.precision.get("amount", 6)
+        quantizer = Decimal(10) ** -Decimal(precision)
+        return float(Decimal(str(amount)).quantize(quantizer, rounding=ROUND_DOWN))
+
+    def _price_to_precision(self, price: float) -> float:
+        """가격을 거래소 정밀도에 맞게 조정"""
+        precision = self.precision.get("price", 2)
+        quantizer = Decimal(10) ** -Decimal(precision)
+        return float(Decimal(str(price)).quantize(quantizer, rounding=ROUND_DOWN))
+
+    def _calculate_position_amount(self, price: float = None) -> float:
+        """
+        포지션 수량 계산 - Binance 최소 주문금액 고려
+
+        NOTIONAL 제한을 충족하기 위해:
+        - 각 DCA 주문이 min_notional * safety_margin 이상이 되도록 계산
+        """
+        if price is None:
+            price = self.current_price
+
+        min_order_value = self.min_notional * self.SAFETY_MARGIN  # $11 minimum (with safety)
+
+        # 남은 DCA 횟수 계산
+        remaining_dca = self.max_dca_count - (self.position.dca_count if self.position else 0)
+        if remaining_dca <= 0:
+            remaining_dca = 1
+
+        # 남은 자본 계산
+        used_capital = 0.0
+        if self.position:
+            used_capital = self.position.total_cost
+        remaining_capital = self.capital - used_capital
+
+        # 각 DCA당 최소 필요 금액 확인
+        amount_per_dca = remaining_capital / remaining_dca
+
+        if amount_per_dca < min_order_value:
+            # 자본이 부족하면 가능한 만큼만 주문
+            amount_per_dca = remaining_capital
+            logger.warning(
+                f"Insufficient remaining capital for DCA. "
+                f"Using remaining ${remaining_capital:.2f}"
+            )
+
+        # 수량 계산 (NOTIONAL 제한 고려)
+        amount = amount_per_dca / self.current_price
+
+        # 최소 수량 확인
+        if amount < self.min_amount:
+            amount = self.min_amount
+
+        return self._amount_to_precision(amount)
+
+    def _validate_order(self, amount: float, price: float) -> bool:
+        """주문이 Binance 제한을 충족하는지 확인"""
+        notional = amount * price
+
+        if amount < self.min_amount:
+            logger.warning(f"Order amount {amount} below minimum {self.min_amount}")
+            return False
+
+        if notional < self.min_notional:
+            logger.warning(f"Order notional ${notional:.2f} below minimum ${self.min_notional}")
+            return False
+
+        return True
 
     async def run(self):
         """메인 루프"""
@@ -258,11 +354,25 @@ class BinanceDCABot:
     async def _initial_buy(self):
         """초기 매수"""
         try:
+            # 임시 포지션 생성 (수량 계산용)
+            self.position = DCAPosition(
+                entry_price=self.current_price,
+                amount=0.0,
+                timestamp=datetime.utcnow(),
+                dca_count=0
+            )
+
             amount = self._calculate_position_amount()
+
+            # 주문 유효성 검사
+            if not self._validate_order(amount, self.current_price):
+                raise ValueError(f"Initial buy order validation failed: amount={amount}, price={self.current_price}")
+
             order = await self.exchange.create_market_buy_order(self.symbol, amount)
 
-            price = order["price"] or order["average"] or self.current_price
+            price = order.get("price") or order.get("average") or self.current_price
 
+            # 실제 포지션 생성
             self.position = DCAPosition(
                 entry_price=price,
                 amount=amount,
@@ -284,7 +394,7 @@ class BinanceDCABot:
             self.trades.append(trade)
             self.total_trades += 1
 
-            logger.info(f"Initial buy: {amount} BTC @ ${price:.2f}")
+            logger.info(f"Initial buy: {amount} BTC @ ${price:.2f} (notional: ${amount * price:.2f})")
 
             # Telegram 알림
             await self._send_telegram_notification(
@@ -297,6 +407,10 @@ class BinanceDCABot:
             if self.on_position_change:
                 self.on_position_change(self.position)
 
+        except ccxt.InsufficientFunds as e:
+            logger.error(f"Insufficient funds for initial buy: {e}")
+        except ccxt.InvalidOrder as e:
+            logger.error(f"Invalid initial buy order: {e}")
         except Exception as e:
             logger.error(f"Failed to execute initial buy: {e}")
             raise
@@ -320,9 +434,15 @@ class BinanceDCABot:
         """DCA 실행 (추가 매수)"""
         try:
             amount = self._calculate_position_amount()
+
+            # 주문 유효성 검사
+            if not self._validate_order(amount, self.current_price):
+                logger.warning("DCA order validation failed, skipping")
+                return
+
             order = await self.exchange.create_market_buy_order(self.symbol, amount)
 
-            price = order["price"] or order["average"] or self.current_price
+            price = order.get("price") or order.get("average") or self.current_price
 
             # 포지션 업데이트 (평균 단가 재계산)
             total_cost = (self.position.entry_price * self.position.amount) + (price * amount)
@@ -361,6 +481,10 @@ class BinanceDCABot:
             if self.on_position_change:
                 self.on_position_change(self.position)
 
+        except ccxt.InsufficientFunds as e:
+            logger.error(f"Insufficient funds for DCA: {e}")
+        except ccxt.InvalidOrder as e:
+            logger.error(f"Invalid DCA order: {e}")
         except Exception as e:
             logger.error(f"Failed to execute DCA: {e}")
 
@@ -384,7 +508,7 @@ class BinanceDCABot:
                 self.position.amount
             )
 
-            exit_price = order["price"] or order["average"] or self.current_price
+            exit_price = order.get("price") or order.get("average") or self.current_price
             pnl = (exit_price - self.position.entry_price) * self.position.amount
             pnl_pct = (exit_price / self.position.entry_price - 1) * 100
 
@@ -434,11 +558,6 @@ class BinanceDCABot:
         except Exception as e:
             logger.error(f"Failed to execute take profit: {e}")
 
-    def _calculate_position_amount(self) -> float:
-        """포지션 수량 계산 (자본을 DCA 횟수로 분할)"""
-        amount_per_dca = (self.capital / self.max_dca_count) / self.current_price
-        return round(amount_per_dca, 6)
-
     async def stop(self):
         """봇 중지"""
         self.status = DCAStatus.IDLE
@@ -455,6 +574,10 @@ class BinanceDCABot:
             await self.event_bus.disconnect()
 
         await self.mqtt.disconnect()
+
+        # 거래소 연결 종료
+        if self.exchange:
+            await self.exchange.close()
 
         # 일일 리포트
         await self._send_daily_report()
@@ -513,6 +636,8 @@ class BinanceDCABot:
             "dca_drop_pct": self.dca_drop_pct,
             "take_profit_pct": self.take_profit_pct,
             "max_dca_count": self.max_dca_count,
+            "min_notional": self.min_notional,
+            "min_amount": self.min_amount,
             "total_trades": self.total_trades,
             "winning_trades": self.winning_trades,
             "win_rate": win_rate,

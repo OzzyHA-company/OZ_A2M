@@ -1,6 +1,6 @@
 """
-Binance Grid Bot - 바이낸스 그리드 봇
-STEP 10: OZ_A2M 완결판
+Binance Grid Bot - 바이낸스 그리드 봇 (Fixed for NOTIONAL errors)
+STEP 10: OZ_A2M 완결판 - Fixed Version
 
 설정:
 - 거래소: Binance
@@ -9,6 +9,11 @@ STEP 10: OZ_A2M 완결판
 - 주문 개수: 20개
 - 자본: $11
 - sandbox: False (실거래)
+
+Fixes:
+- Binance 최소 주문금액(NOTIONAL) 자동 계산
+- amount_to_precision / price_to_precision 적용
+- CCXT async 지원 패턴 적용
 """
 
 import asyncio
@@ -17,7 +22,7 @@ import os
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Dict, List, Optional, Any, Callable
-from decimal import Decimal
+from decimal import Decimal, ROUND_DOWN
 from enum import Enum
 
 import ccxt.async_support as ccxt
@@ -69,13 +74,18 @@ class GridTrade:
 
 class BinanceGridBot:
     """
-    Binance 그리드 트레이딩 봇
+    Binance 그리드 트레이딩 봇 (Fixed for NOTIONAL errors)
 
     전략:
     - 현재가 기준으로 위아래에 그리드 주문 배치
     - 매수 주문 체결 시 해당 레벨 위에 매도 주문 배치
     - 매도 주문 체결 시 해당 레벨 아래에 매수 주문 배치
+    - Binance 최소 주문금액 자동 계산
     """
+
+    # Binance Spot 최소 주문금액 (USDT 기준)
+    MIN_NOTIONAL_USDT = 10.0  # $10 minimum for most pairs
+    SAFETY_MARGIN = 1.1  # 10% safety margin
 
     def __init__(
         self,
@@ -109,6 +119,10 @@ class BinanceGridBot:
 
         # 거래소
         self.exchange: Optional[ccxt.Exchange] = None
+        self.market_info: Optional[Dict] = None
+        self.precision: Dict[str, int] = {"amount": 6, "price": 2}
+        self.min_amount: float = 0.00001
+        self.min_notional: float = self.MIN_NOTIONAL_USDT
 
         # MQTT
         mqtt_config = MQTTConfig(host=mqtt_host, port=mqtt_port, client_id=bot_id)
@@ -162,10 +176,22 @@ class BinanceGridBot:
         self.exchange = exchange_class(config)
 
         if self.sandbox:
-            self.exchange.set_sandbox_mode(True)
+            await self.exchange.set_sandbox_mode(True)
 
         # 마켓 로드
         await self.exchange.load_markets()
+        self.market_info = self.exchange.market(self.symbol)
+
+        # 마켓 정보 추출 (precision, limits)
+        if self.market_info:
+            self.precision["amount"] = self.market_info["precision"].get("amount", 6)
+            self.precision["price"] = self.market_info["precision"].get("price", 2)
+            limits = self.market_info.get("limits", {})
+            self.min_amount = limits.get("amount", {}).get("min", 0.00001)
+            self.min_notional = limits.get("cost", {}).get("min", self.MIN_NOTIONAL_USDT)
+
+        logger.info(f"Market info loaded: precision={self.precision}, "
+                   f"min_amount={self.min_amount}, min_notional={self.min_notional}")
 
         # 현재가 조회
         ticker = await self.exchange.fetch_ticker(self.symbol)
@@ -193,7 +219,8 @@ class BinanceGridBot:
             f"심볼: {self.symbol}\n"
             f"현재가: ${self.current_price:.2f}\n"
             f"그리드: {self.grid_count}개 ({self.grid_spacing_pct*100}%)\n"
-            f"자본: ${self.capital}"
+            f"자본: ${self.capital}\n"
+            f"최소주문: ${self.min_notional * self.SAFETY_MARGIN:.2f}"
         )
 
     def _calculate_grid_range(self):
@@ -206,7 +233,72 @@ class BinanceGridBot:
         price_step = (self.grid_range_high - self.grid_range_low) / (self.grid_count - 1)
         for i in range(self.grid_count):
             price = self.grid_range_low + (price_step * i)
+            price = self._price_to_precision(price)
             self.grid_levels[i] = GridLevel(level=i, price=price)
+
+    def _amount_to_precision(self, amount: float) -> float:
+        """수량을 거래소 정밀도에 맞게 조정"""
+        precision = self.precision.get("amount", 6)
+        quantizer = Decimal(10) ** -Decimal(precision)
+        return float(Decimal(str(amount)).quantize(quantizer, rounding=ROUND_DOWN))
+
+    def _price_to_precision(self, price: float) -> float:
+        """가격을 거래소 정밀도에 맞게 조정"""
+        precision = self.precision.get("price", 2)
+        quantizer = Decimal(10) ** -Decimal(precision)
+        return float(Decimal(str(price)).quantize(quantizer, rounding=ROUND_DOWN))
+
+    def _calculate_order_amount(self, price: float = None) -> float:
+        """
+        주문 수량 계산 - Binance 최소 주문금액 고려
+
+        NOTIONAL 제한을 충족하기 위해:
+        - 각 주문이 min_notional * safety_margin 이상이 되도록 계산
+        - 충분한 주문을 배치할 수 없으면 그리드 수 조정
+        """
+        if price is None:
+            price = self.current_price
+
+        min_order_value = self.min_notional * self.SAFETY_MARGIN  # $11 minimum (with safety)
+
+        # 각 그리드당 최소 필요 금액
+        amount_per_grid_value = self.capital / self.grid_count
+
+        if amount_per_grid_value < min_order_value:
+            # 자본이 부족하면 그리드 수 자동 조정
+            adjusted_grid_count = int(self.capital / min_order_value)
+            if adjusted_grid_count < 2:
+                adjusted_grid_count = 2  # 최소 2개 그리드
+
+            logger.warning(
+                f"Capital too low for {self.grid_count} grids. "
+                f"Adjusting to {adjusted_grid_count} grids."
+            )
+            self.grid_count = adjusted_grid_count
+            amount_per_grid_value = self.capital / self.grid_count
+
+        # 수량 계산 (NOTIONAL 제한 고려)
+        amount = amount_per_grid_value / price
+
+        # 최소 수량 확인
+        if amount < self.min_amount:
+            amount = self.min_amount
+
+        return self._amount_to_precision(amount)
+
+    def _validate_order(self, amount: float, price: float) -> bool:
+        """주문이 Binance 제한을 충족하는지 확인"""
+        notional = amount * price
+
+        if amount < self.min_amount:
+            logger.warning(f"Order amount {amount} below minimum {self.min_amount}")
+            return False
+
+        if notional < self.min_notional:
+            logger.warning(f"Order notional ${notional:.2f} below minimum ${self.min_notional}")
+            return False
+
+        return True
 
     async def run(self):
         """메인 루프"""
@@ -262,7 +354,12 @@ class BinanceGridBot:
         """매수 주문 배치"""
         try:
             grid = self.grid_levels[level]
-            amount = self._calculate_order_amount()
+            amount = self._calculate_order_amount(grid.price)
+
+            # 주문 유효성 검사
+            if not self._validate_order(amount, grid.price):
+                logger.warning(f"Skipping buy order at level {level} due to validation failure")
+                return
 
             order = await self.exchange.create_limit_buy_order(
                 self.symbol,
@@ -271,8 +368,12 @@ class BinanceGridBot:
             )
 
             grid.buy_order_id = order["id"]
-            logger.debug(f"Placed buy order at level {level}: ${grid.price:.2f}")
+            logger.debug(f"Placed buy order at level {level}: ${grid.price:.2f}, amount={amount:.6f}")
 
+        except ccxt.InsufficientFunds as e:
+            logger.error(f"Insufficient funds for buy order at level {level}: {e}")
+        except ccxt.InvalidOrder as e:
+            logger.error(f"Invalid buy order at level {level}: {e}")
         except Exception as e:
             logger.error(f"Failed to place buy order at level {level}: {e}")
 
@@ -280,7 +381,12 @@ class BinanceGridBot:
         """매도 주문 배치"""
         try:
             grid = self.grid_levels[level]
-            amount = self._calculate_order_amount()
+            amount = self._calculate_order_amount(grid.price)
+
+            # 주문 유효성 검사
+            if not self._validate_order(amount, grid.price):
+                logger.warning(f"Skipping sell order at level {level} due to validation failure")
+                return
 
             order = await self.exchange.create_limit_sell_order(
                 self.symbol,
@@ -289,16 +395,14 @@ class BinanceGridBot:
             )
 
             grid.sell_order_id = order["id"]
-            logger.debug(f"Placed sell order at level {level}: ${grid.price:.2f}")
+            logger.debug(f"Placed sell order at level {level}: ${grid.price:.2f}, amount={amount:.6f}")
 
+        except ccxt.InsufficientFunds as e:
+            logger.error(f"Insufficient funds for sell order at level {level}: {e}")
+        except ccxt.InvalidOrder as e:
+            logger.error(f"Invalid sell order at level {level}: {e}")
         except Exception as e:
             logger.error(f"Failed to place sell order at level {level}: {e}")
-
-    def _calculate_order_amount(self) -> float:
-        """주문 수량 계산"""
-        # 자본을 그리드 개수로 분할
-        amount_per_grid = (self.capital / self.grid_count) / self.current_price
-        return round(amount_per_grid, 6)
 
     async def _monitor_orders(self):
         """주문 체결 모니터링"""
@@ -323,7 +427,7 @@ class BinanceGridBot:
     async def _handle_buy_filled(self, level: int):
         """매수 체결 처리"""
         grid = self.grid_levels[level]
-        amount = self._calculate_order_amount()
+        amount = self._calculate_order_amount(grid.price)
 
         # 거래 기록
         trade = GridTrade(
@@ -354,7 +458,7 @@ class BinanceGridBot:
     async def _handle_sell_filled(self, level: int):
         """매도 체결 처리"""
         grid = self.grid_levels[level]
-        amount = self._calculate_order_amount()
+        amount = self._calculate_order_amount(grid.price)
 
         # 그리드 차익 계산 (직전 매수 가격과의 차이)
         grid_profit = amount * grid.price * self.grid_spacing_pct
@@ -439,6 +543,10 @@ class BinanceGridBot:
 
         await self.mqtt.disconnect()
 
+        # 거래소 연결 종료
+        if self.exchange:
+            await self.exchange.close()
+
         # 일일 리포트
         await self._send_daily_report()
 
@@ -491,6 +599,8 @@ class BinanceGridBot:
             "grid_spacing_pct": self.grid_spacing_pct,
             "grid_range_low": self.grid_range_low,
             "grid_range_high": self.grid_range_high,
+            "min_notional": self.min_notional,
+            "min_amount": self.min_amount,
             "total_trades": self.total_trades,
             "winning_trades": self.winning_trades,
             "win_rate": win_rate,

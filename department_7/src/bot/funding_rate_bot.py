@@ -1,6 +1,6 @@
 """
-Funding Rate Bot - 펀딩 레이트 봇
-STEP 11: OZ_A2M 완결판
+Funding Rate Bot - 펀딩 레이트 봇 (Fixed async/await)
+STEP 11: OZ_A2M 완결판 - Fixed Version
 
 설정:
 - 거래소: Binance + Bybit
@@ -8,6 +8,11 @@ STEP 11: OZ_A2M 완결판
 - 8시간마다 펀딩 수취
 - 자본: $16
 - sandbox: False (실거래)
+
+Fixes:
+- CCXT async_support 적용
+- async/await 패턴 전체 재구조화
+- Market precision 적용
 """
 
 import asyncio
@@ -16,10 +21,10 @@ import os
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Any, Callable
-from decimal import Decimal
+from decimal import Decimal, ROUND_DOWN
 from enum import Enum
 
-import ccxt
+import ccxt.async_support as ccxt
 
 import sys
 from pathlib import Path
@@ -67,13 +72,18 @@ class FundingTrade:
 
 class FundingRateBot:
     """
-    펀딩 레이트 차익 봇
+    펀딩 레이트 차익 봇 (Fixed async/await)
 
     전략:
     - 양수 펀딩레이트가 높은 종목 선별
     - 현물 매수 + 선물 공매도 헤지
     - 8시간마다 펀딩 수취
+    - CCXT async 지원 패턴 적용
     """
+
+    # 최소 주문금액 (USDT 기준)
+    MIN_NOTIONAL_USDT = 10.0
+    SAFETY_MARGIN = 1.1
 
     def __init__(
         self,
@@ -100,6 +110,7 @@ class FundingRateBot:
         self.positions: Dict[str, Dict] = {}  # 헤지 포지션
         self.trades: List[FundingTrade] = []
         self.funding_earnings: float = 0.0  # 누적 펀딩 수익
+        self.market_info: Dict[str, Dict] = {}
 
         # MQTT
         mqtt_config = MQTTConfig(host=mqtt_host, port=mqtt_port, client_id=bot_id)
@@ -162,7 +173,7 @@ class FundingRateBot:
             api_key, api_secret = self._load_api_keys(exchange_id)
 
             if not api_key or not api_secret:
-                logger.warning(f"API keys not found for {exchange_id}, using mock mode")
+                logger.warning(f"API keys not found for {exchange_id}, skipping")
                 return
 
             exchange_class = getattr(ccxt, exchange_id)
@@ -175,11 +186,13 @@ class FundingRateBot:
 
             if exchange_id == "binance":
                 config["options"] = {"defaultType": "spot"}
+            elif exchange_id == "bybit":
+                config["options"] = {"defaultType": "spot"}
 
             exchange = exchange_class(config)
 
             if self.sandbox and hasattr(exchange, "set_sandbox_mode"):
-                exchange.set_sandbox_mode(True)
+                await exchange.set_sandbox_mode(True)
 
             await exchange.load_markets()
             self.exchanges[exchange_id] = exchange
@@ -188,6 +201,34 @@ class FundingRateBot:
 
         except Exception as e:
             logger.error(f"Failed to connect to {exchange_id}: {e}")
+
+    def _amount_to_precision(self, exchange_id: str, symbol: str, amount: float) -> float:
+        """수량을 거래소 정밀도에 맞게 조정"""
+        key = f"{exchange_id}:{symbol}"
+        if key in self.market_info:
+            precision = self.market_info[key]["precision"].get("amount", 6)
+        else:
+            precision = 6
+        quantizer = Decimal(10) ** -Decimal(precision)
+        return float(Decimal(str(amount)).quantize(quantizer, rounding=ROUND_DOWN))
+
+    def _price_to_precision(self, exchange_id: str, symbol: str, price: float) -> float:
+        """가격을 거래소 정밀도에 맞게 조정"""
+        key = f"{exchange_id}:{symbol}"
+        if key in self.market_info:
+            precision = self.market_info[key]["precision"].get("price", 2)
+        else:
+            precision = 2
+        quantizer = Decimal(10) ** -Decimal(precision)
+        return float(Decimal(str(price)).quantize(quantizer, rounding=ROUND_DOWN))
+
+    def _get_min_notional(self, exchange_id: str, symbol: str) -> float:
+        """심볼의 최소 주문 금액 조회"""
+        key = f"{exchange_id}:{symbol}"
+        if key in self.market_info:
+            limits = self.market_info[key].get("limits", {})
+            return limits.get("cost", {}).get("min", self.MIN_NOTIONAL_USDT)
+        return self.MIN_NOTIONAL_USDT
 
     async def run(self):
         """메인 루프"""
@@ -242,22 +283,35 @@ class FundingRateBot:
         for exchange_id, exchange in self.exchanges.items():
             try:
                 # 선물 마켓에서 펀딩 레이트 조회
-                if hasattr(exchange, "fetchFundingRates"):
-                    rates = await exchange.fetchFundingRates()
-                    for symbol, rate_info in rates.items():
-                        if symbol.endswith("/USD") or symbol.endswith("/USDT"):
-                            key = f"{exchange_id}:{symbol}"
-                            self.funding_rates[key] = FundingRate(
-                                exchange=exchange_id,
-                                symbol=symbol,
-                                funding_rate=float(rate_info.get("fundingRate", 0)),
-                                funding_time=datetime.fromtimestamp(
-                                    rate_info.get("fundingTimestamp", 0) / 1000
-                                ),
-                                next_funding_time=datetime.fromtimestamp(
-                                    rate_info.get("nextFundingTimestamp", 0) / 1000
-                                ),
-                            )
+                if hasattr(exchange, "fetch_funding_rate"):
+                    # Binance futures
+                    try:
+                        markets = await exchange.load_markets()
+                        for symbol in markets:
+                            if "/USDT" in symbol or "/USD" in symbol:
+                                try:
+                                    funding_data = await exchange.fetch_funding_rate(symbol)
+                                    if funding_data:
+                                        key = f"{exchange_id}:{symbol}"
+                                        funding_rate = funding_data.get("fundingRate", 0)
+                                        funding_timestamp = funding_data.get("fundingTimestamp", 0)
+                                        next_funding_timestamp = funding_data.get("nextFundingTimestamp", 0)
+
+                                        self.funding_rates[key] = FundingRate(
+                                            exchange=exchange_id,
+                                            symbol=symbol,
+                                            funding_rate=float(funding_rate) if funding_rate else 0,
+                                            funding_time=datetime.fromtimestamp(
+                                                funding_timestamp / 1000 if funding_timestamp else 0
+                                            ),
+                                            next_funding_time=datetime.fromtimestamp(
+                                                next_funding_timestamp / 1000 if next_funding_timestamp else 0
+                                            ),
+                                        )
+                                except Exception as e:
+                                    logger.debug(f"Failed to fetch funding for {symbol}: {e}")
+                    except Exception as e:
+                        logger.warning(f"Error fetching funding rates from {exchange_id}: {e}")
 
                 logger.debug(f"Fetched funding rates from {exchange_id}")
 
@@ -296,15 +350,26 @@ class FundingRateBot:
         try:
             exchange = self.exchanges[exchange_id]
 
+            # 마켓 정보 로드
+            market = await exchange.market(symbol)
+            self.market_info[f"{exchange_id}:{symbol}"] = market
+
+            # 최소 주문금액 확인
+            min_notional = self._get_min_notional(exchange_id, symbol)
+            position_capital = self.capital / 3  # 자본을 3개 종목으로 분할
+
+            if position_capital < min_notional * self.SAFETY_MARGIN:
+                logger.warning(
+                    f"Insufficient capital for {symbol}: ${position_capital:.2f} < ${min_notional * self.SAFETY_MARGIN:.2f}"
+                )
+                return
+
             # 현물 매수
             ticker = await exchange.fetch_ticker(symbol)
             price = ticker["last"]
-            amount = (self.capital / 3) / price  # 자본을 3개 종목으로 분할
+            amount = self._amount_to_precision(exchange_id, symbol, position_capital / price)
 
             spot_order = await exchange.create_market_buy_order(symbol, amount)
-
-            # 선물 공매도 (선물 거래소가 지원하는 경우)
-            # TODO: 선물 거래 구현
 
             # 포지션 기록
             self.positions[symbol] = {
@@ -344,6 +409,10 @@ class FundingRateBot:
                 f"수량: {amount:.6f}"
             )
 
+        except ccxt.InsufficientFunds as e:
+            logger.error(f"Insufficient funds for hedge position: {e}")
+        except ccxt.InvalidOrder as e:
+            logger.error(f"Invalid order for hedge position: {e}")
         except Exception as e:
             logger.error(f"Failed to enter hedge position: {e}")
 
@@ -405,7 +474,7 @@ class FundingRateBot:
                 symbol, position["spot_amount"]
             )
 
-            exit_price = sell_order["price"] or sell_order["average"]
+            exit_price = sell_order.get("price") or sell_order.get("average") or position["entry_price"]
             trade_pnl = (exit_price - position["entry_price"]) * position["spot_amount"]
 
             # 거래 기록
