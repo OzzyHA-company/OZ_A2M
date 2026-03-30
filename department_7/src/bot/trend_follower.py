@@ -16,7 +16,7 @@ import signal
 import sys
 from dataclasses import dataclass, asdict
 from datetime import datetime
-from typing import Dict, Optional, List
+from typing import Dict, Optional, List, Any
 from collections import deque
 
 import paho.mqtt.client as mqtt
@@ -406,22 +406,28 @@ class TrendFollowerBot:
 
     def publish_status(self):
         """상태 발행"""
-        status = {
-            'bot_id': self.bot_id,
-            'status': 'running' if self.running else 'stopped',
-            'symbol': self.symbol,
-            'position': asdict(self.position) if self.position else None,
-            'ema_fast': self.ema_fast_current,
-            'ema_slow': self.ema_slow_current,
-            'macd_histogram': self.macd_histogram,
-            'timestamp': datetime.now().isoformat()
-        }
+        status = self.get_status()
 
         if self.mqtt_client:
             self.mqtt_client.publish(
                 f"oz/a2m/status/{self.bot_id}",
                 json.dumps(status)
             )
+
+    def get_status(self) -> Dict[str, Any]:
+        """봇 상태 반환"""
+        return {
+            'bot_id': self.bot_id,
+            'bot_type': 'trend_follower',
+            'status': 'running' if self.running else 'idle',
+            'mock_mode': False,
+            'symbol': self.symbol,
+            'position': asdict(self.position) if self.position else None,
+            'ema_fast': getattr(self, 'ema_fast_current', None),
+            'ema_slow': getattr(self, 'ema_slow_current', None),
+            'macd_histogram': getattr(self, 'macd_histogram', None),
+            'timestamp': datetime.now().isoformat()
+        }
 
     def start(self):
         """봇 시작"""

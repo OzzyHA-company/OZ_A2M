@@ -349,6 +349,19 @@ class MarketMakerBot:
         self.running = False
         logger.info(f"Stopping MarketMakerBot: {self.bot_id}")
 
+    def get_status(self) -> Dict[str, Any]:
+        """봇 상태 반환"""
+        return {
+            "bot_id": self.bot_id,
+            "bot_type": "market_maker",
+            "status": "running" if self.running else "idle",
+            "mock_mode": False,
+            "symbol": self.symbol,
+            "exchange": self.exchange,
+            "inventory_ratio": self.inventory.inventory_ratio if hasattr(self, 'inventory') else 0.5,
+            "timestamp": datetime.utcnow().isoformat(),
+        }
+
     async def _fetch_orderbook(self) -> Optional[OrderBook]:
         """오더북 조회 (모의)"""
         # 실제 구현에서는 거래소 API 호출

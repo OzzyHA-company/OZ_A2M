@@ -414,6 +414,12 @@ body{background:var(--background);color:var(--text-primary);font-family:'Rajdhan
         <button class="action-btn" onclick="toggleTelegram()" id="btn-telegram">🔔 Telegram ON</button>
         <button class="action-btn danger" onclick="killAllBots()">🚨 전체 킬스위치</button>
       </div>
+      <div class="action-row" style="margin-top:12px;">
+        <button class="action-btn" onclick="systemOptimize('clear_memory')">🧹 메모리 정리</button>
+        <button class="action-btn" onclick="systemOptimize('rotate_logs')">📋 로그 로테이션</button>
+        <button class="action-btn" onclick="systemOptimize('clear_cache')">💾 캐시 클리어</button>
+        <button class="action-btn" onclick="systemOptimize('auto_repair')" style="border-color:var(--secondary);color:var(--secondary);">🔧 Auto 수리</button>
+      </div>
     </div>
   </div>
 
@@ -446,22 +452,11 @@ body{background:var(--background);color:var(--text-primary);font-family:'Rajdhan
 <div id="progress-bar"><div id="progress-fill" style="width:100%"></div></div>
 
 <script>
-// BOT CONFIGURATION
-const BOTS = {
-  // 안정봇 8개
-  'grid_binance_001': {name: '봇-01 Binance Grid', exchange: 'Binance', symbol: 'BTC/USDT', capital: 11, type: 'stable', status: 'running'},
-  'dca_binance_001': {name: '봇-02 Binance DCA', exchange: 'Binance', symbol: 'BTC/USDT', capital: 14, type: 'stable', status: 'running'},
-  'triarb_binance_001': {name: '봇-03 삼각아비트라지', exchange: 'Binance', symbol: 'BTC/ETH/BNB', capital: 10.35, type: 'stable', status: 'running'},
-  'funding_binance_bybit_001': {name: '봇-04 Funding Rate', exchange: 'Binance+Bybit', symbol: 'Multi', capital: 16, type: 'stable', status: 'running'},
-  'grid_bybit_001': {name: '봇-05 Bybit Grid', exchange: 'Bybit', symbol: 'SOL/USDT', capital: 8.44, type: 'stable', status: 'running'},
-  'scalper_bybit_001': {name: '봇-06 Bybit 스캘핑', exchange: 'Bybit', symbol: 'SOL/USDT', capital: 20, type: 'stable', status: 'running'},
-  'ibkr_forecast_001': {name: '봇-08 IBKR Forecast', exchange: 'IBKR', symbol: 'AAPL/MSFT', capital: 10, type: 'stable', status: 'mock'},
-  'polymarket_ai_001': {name: '봇-09 Polymarket AI', exchange: 'Polymarket', symbol: 'Multi', capital: 19.85, type: 'stable', status: 'running'},
-  // 도파민봇 3개
-  'hyperliquid_mm_001': {name: '봇-07 Hyperliquid', exchange: 'Hyperliquid', symbol: 'SOL-PERP', capital: 10.12, type: 'dopamine', status: 'running', leverage: 5},
-  'pump_sniper_001': {name: '봇-11 Pump.fun 스나이퍼', exchange: 'Solana', symbol: 'New Tokens', capital: 0.1, type: 'dopamine', status: 'running', unit: 'SOL'},
-  'gmgn_copy_001': {name: '봇-12 GMGN 카피', exchange: 'Solana', symbol: 'Smart Money', capital: 0.067, type: 'dopamine', status: 'running', unit: 'SOL'}
-};
+// 실제 봇 데이터 저장소 (API에서 로드)
+let BOTS = {};
+let EXCHANGE_BALANCES = {};
+let API_USAGE = {};
+let SYSTEM_METRICS = {};
 
 // WebSocket 연결
 let ws = null;
@@ -469,12 +464,37 @@ let currentTab = 'overview';
 let charts = {};
 
 // 초기화
-document.addEventListener('DOMContentLoaded', function() {
+document.addEventListener('DOMContentLoaded', async function() {
+  await loadInitialData();
   initWebSocket();
   renderBots();
   updateOverview();
+  initCharts();
+  updateExchangeBalances();
   startAutoRefresh();
 });
+
+// 초기 데이터 로드
+async function loadInitialData() {
+  try {
+    // 봇 상태 로드
+    const botsRes = await fetch('/api/bots');
+    const botsData = await botsRes.json();
+    if (Array.isArray(botsData)) {
+      botsData.forEach(bot => {
+        BOTS[bot.bot_id] = bot;
+      });
+    }
+
+    // API 사용량 로드
+    const apiRes = await fetch('/api/api-usage');
+    API_USAGE = await apiRes.json();
+
+    console.log('Initial data loaded:', Object.keys(BOTS).length, 'bots');
+  } catch (e) {
+    console.error('Failed to load initial data:', e);
+  }
+}
 
 // WebSocket 초기화
 function initWebSocket() {
@@ -483,6 +503,8 @@ function initWebSocket() {
     ws = new WebSocket(wsUrl);
     ws.onopen = function() {
       console.log('WebSocket connected');
+      // 초기 데이터 요청
+      ws.send(JSON.stringify({type: 'get_balances'}));
     };
     ws.onmessage = function(event) {
       const data = JSON.parse(event.data);
@@ -502,12 +524,41 @@ function initWebSocket() {
 
 // WebSocket 메시지 처리
 function handleWebSocketMessage(data) {
-  if (data.type === 'bot_status') {
+  if (data.type === 'init') {
+    // 초기 데이터 수신
+    if (data.bots) {
+      data.bots.forEach(bot => {
+        BOTS[bot.bot_id] = {...(BOTS[bot.bot_id] || {}), ...bot};
+      });
+    }
+    if (data.exchange_balances) {
+      EXCHANGE_BALANCES = data.exchange_balances;
+      updateExchangeBalanceDisplay();
+    }
+    if (data.system_metrics) {
+      SYSTEM_METRICS = data.system_metrics;
+      updateSystemMetrics(data.system_metrics);
+    }
+    if (data.api_usage) {
+      API_USAGE = data.api_usage;
+      updateApiUsageDisplay();
+    }
+  } else if (data.type === 'bot_status') {
+    if (BOTS[data.bot_id]) {
+      BOTS[data.bot_id].status = data.status;
+      BOTS[data.bot_id].pnl = data.pnl;
+      BOTS[data.bot_id].trades = data.trades;
+    }
     updateBotStatus(data.bot_id, data.status);
+    updateOverview();
   } else if (data.type === 'profit_update') {
     updateProfit(data);
   } else if (data.type === 'system_metrics') {
+    SYSTEM_METRICS = data;
     updateSystemMetrics(data);
+  } else if (data.type === 'exchange_balances') {
+    EXCHANGE_BALANCES = data.data;
+    updateExchangeBalanceDisplay();
   }
 }
 
@@ -533,20 +584,24 @@ function renderBots() {
   let dopamineHtml = '';
 
   for (const [botId, bot] of Object.entries(BOTS)) {
-    const statusClass = bot.status === 'running' ? 'running' : (bot.status === 'mock' ? 'paused' : 'error');
-    const pnl = (Math.random() * 2 - 0.5).toFixed(2); // Mock PnL
+    const status = bot.status || 'stopped';
+    const statusClass = status === 'running' || status === 'idle' ? 'running' : (bot.mock_mode ? 'paused' : 'error');
+    const pnl = bot.pnl || 0;
+    const pnlPct = bot.capital ? ((pnl / bot.capital) * 100).toFixed(2) : '0.00';
     const capitalStr = bot.unit ? `${bot.capital} ${bot.unit}` : `$${bot.capital}`;
+    const botType = bot.type || 'stable';
 
     const cardHtml = `
-      <div class="bot-card ${bot.type === 'dopamine' ? 'neon' : ''}" id="card-${botId}">
+      <div class="bot-card ${botType === 'dopamine' ? 'neon' : ''}" id="card-${botId}">
         <div class="bot-card-header">
-          <span class="bot-name">${bot.name}</span>
-          <span class="status-badge ${statusClass}">${bot.status.toUpperCase()}</span>
+          <span class="bot-name">${bot.name || botId}</span>
+          <span class="status-badge ${statusClass}">${status.toUpperCase()}</span>
         </div>
-        <div class="bot-pnl ${pnl >= 0 ? 'profit' : 'loss'}">${pnl >= 0 ? '+' : ''}${pnl}%</div>
+        <div class="bot-pnl ${pnl >= 0 ? 'profit' : 'loss'}">${pnl >= 0 ? '+' : ''}$${pnl.toFixed(2)}</div>
         <div class="bot-detail">
-          ${bot.exchange} | ${bot.symbol}<br>
-          자본: ${capitalStr}
+          ${bot.exchange || 'Unknown'} | ${bot.symbol || 'Multi'}<br>
+          자본: ${capitalStr} | 수익률: ${pnlPct}%<br>
+          거래: ${bot.trades || 0}회
           ${bot.leverage ? ` | 레버리지: ${bot.leverage}x` : ''}
         </div>
         <div class="bot-controls">
@@ -557,7 +612,7 @@ function renderBots() {
       </div>
     `;
 
-    if (bot.type === 'stable') {
+    if (botType === 'stable') {
       stableHtml += cardHtml;
     } else {
       dopamineHtml += cardHtml;
@@ -580,22 +635,158 @@ function botControl(botId, action) {
 }
 
 // 종합현황 업데이트
-function updateOverview() {
-  // Mock 데이터
-  const totalCapital = Object.values(BOTS).reduce((sum, b) => sum + (b.unit ? b.capital * 150 : b.capital), 0);
-  const todayProfit = (Math.random() * 10 - 2).toFixed(2);
-  const totalProfit = (Math.random() * 50 + 10).toFixed(2);
-  const withdrawable = Math.max(0, (totalProfit * 0.5 - 50)).toFixed(2);
+async function updateOverview() {
+  try {
+    // API에서 실제 데이터 로드
+    const [statusRes, profitRes] = await Promise.all([
+      fetch('/api/status').then(r => r.json()),
+      fetch('/api/profit').then(r => r.json())
+    ]);
 
-  document.getElementById('ov-total').textContent = `$${totalCapital.toFixed(2)}`;
-  document.getElementById('ov-today').textContent = `${todayProfit >= 0 ? '+' : ''}$${todayProfit}`;
-  document.getElementById('ov-today').className = 'stat-value ' + (todayProfit >= 0 ? 'profit' : 'loss');
-  document.getElementById('ov-today-sub').textContent = `누적 $${totalProfit}`;
-  document.getElementById('ov-withdraw').textContent = `$${withdrawable}`;
-  document.getElementById('wd-available').textContent = `$${withdrawable}`;
+    const totalCapital = statusRes.total_capital || 0;
+    const totalProfit = profitRes.total || 0;
+    const todayProfit = profitRes.daily && profitRes.daily.length > 0
+      ? profitRes.daily[profitRes.daily.length - 1]
+      : 0;
+    const withdrawable = statusRes.withdrawable || 0;
+    const runningBots = statusRes.running_bots || 0;
+    const totalBots = statusRes.total_bots || 0;
 
-  const runningBots = Object.values(BOTS).filter(b => b.status === 'running').length;
-  document.getElementById('ov-bots').textContent = `${runningBots}/11`;
+    document.getElementById('ov-total').textContent = `$${totalCapital.toFixed(2)}`;
+    document.getElementById('ov-today').textContent = `${todayProfit >= 0 ? '+' : ''}$${todayProfit.toFixed(2)}`;
+    document.getElementById('ov-today').className = 'stat-value ' + (todayProfit >= 0 ? 'profit' : 'loss');
+    document.getElementById('ov-today-sub').textContent = `누적 $${totalProfit.toFixed(2)}`;
+    document.getElementById('ov-withdraw').textContent = `$${withdrawable.toFixed(2)}`;
+    document.getElementById('wd-available').textContent = `$${withdrawable.toFixed(2)}`;
+    document.getElementById('ov-bots').textContent = `${runningBots}/${totalBots}`;
+
+    // 상태 텍스트 업데이트
+    const statusEl = document.getElementById('ov-bot-status');
+    if (statusEl) {
+      statusEl.textContent = runningBots === totalBots ? '모든 봇 정상' : `${totalBots - runningBots}개 봇 대기중`;
+    }
+
+    // 수익 차트 업데이트
+    if (charts.profit && profitRes.daily) {
+      charts.profit.data.datasets[0].data = profitRes.daily;
+      charts.profit.update();
+    }
+
+  } catch (e) {
+    console.error('Failed to update overview:', e);
+  }
+}
+
+// 거래소 잔액 업데이트
+async function updateExchangeBalances() {
+  try {
+    const res = await fetch('/api/exchange-balances');
+    const data = await res.json();
+    if (data.balances) {
+      EXCHANGE_BALANCES = data.balances;
+      updateExchangeBalanceDisplay();
+    }
+  } catch (e) {
+    console.error('Failed to update exchange balances:', e);
+  }
+}
+
+// 거래소 잔액 표시 업데이트
+function updateExchangeBalanceDisplay() {
+  const balanceMap = {
+    'bal-binance': EXCHANGE_BALANCES.binance?.USDT || '--',
+    'bal-bybit': EXCHANGE_BALANCES.bybit?.USDT || '--',
+    'bal-hyper': EXCHANGE_BALANCES.hyperliquid?.USDC || '--',
+    'bal-metamask': EXCHANGE_BALANCES.metamask?.USDC || '--',
+    'bal-phantom-b': EXCHANGE_BALANCES.phantom_b?.SOL || '--',
+    'bal-phantom-c': EXCHANGE_BALANCES.phantom_c?.SOL || '--',
+  };
+
+  for (const [id, value] of Object.entries(balanceMap)) {
+    const el = document.getElementById(id);
+    if (el) {
+      el.textContent = typeof value === 'number' ? `$${value.toFixed(2)}` : value;
+    }
+  }
+}
+
+// API 사용량 표시 업데이트
+function updateApiUsageDisplay() {
+  const container = document.getElementById('api-usage');
+  if (!container) return;
+
+  let html = '';
+  for (const [api, data] of Object.entries(API_USAGE)) {
+    const usagePct = (data.calls / data.limit) * 100;
+    const statusClass = usagePct > 90 ? 'err' : 'ok';
+    html += `
+      <div class="api-card">
+        <div class="api-card-header">
+          <span class="api-name">${api.toUpperCase()}</span>
+          <span class="api-badge ${statusClass}">${usagePct.toFixed(1)}%</span>
+        </div>
+        <div class="api-calls">${data.calls} / ${data.limit}</div>
+        <div style="font-size:11px;color:var(--text-secondary);">남음: ${data.remaining}</div>
+      </div>
+    `;
+  }
+  container.innerHTML = html;
+}
+
+// 시스템 메트릭스 업데이트
+function updateSystemMetrics(data) {
+  // 도넛 차트 업데이트
+  updateDonutChart('cpu-donut', data.cpu || 0, 'cpu-pct');
+  updateDonutChart('ram-donut', data.memory || 0, 'ram-pct');
+  updateDonutChart('disk-donut', data.disk || 0, 'disk-pct');
+  updateDonutChart('docker-donut', data.docker || 0, 'docker-pct');
+}
+
+// 도넛 차트 업데이트
+function updateDonutChart(canvasId, percentage, textId) {
+  const canvas = document.getElementById(canvasId);
+  const textEl = document.getElementById(textId);
+
+  if (!canvas) return;
+
+  // 텍스트 업데이트
+  if (textEl) {
+    textEl.textContent = Math.round(percentage) + '%';
+  }
+
+  // 차트가 없으면 생성
+  if (!charts[canvasId]) {
+    const ctx = canvas.getContext('2d');
+    charts[canvasId] = new Chart(ctx, {
+      type: 'doughnut',
+      data: {
+        labels: ['Used', 'Free'],
+        datasets: [{
+          data: [percentage, 100 - percentage],
+          backgroundColor: [
+            percentage > 80 ? '#CF6679' : (percentage > 60 ? '#FFDE03' : '#03DAC6'),
+            'rgba(255,255,255,0.1)'
+          ],
+          borderWidth: 0
+        }]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        cutout: '70%',
+        plugins: { legend: { display: false } }
+      }
+    });
+  } else {
+    // 기존 차트 업데이트
+    const chart = charts[canvasId];
+    chart.data.datasets[0].data = [percentage, 100 - percentage];
+    chart.data.datasets[0].backgroundColor = [
+      percentage > 80 ? '#CF6679' : (percentage > 60 ? '#FFDE03' : '#03DAC6'),
+      'rgba(255,255,255,0.1)'
+    ];
+    chart.update();
+  }
 }
 
 // 출금
@@ -660,6 +851,35 @@ function restartSystem() {
     .catch(e => alert('재시작 요청 실패: ' + e));
 }
 
+// 시스템 최적화
+async function systemOptimize(action) {
+  const actionNames = {
+    'clear_memory': '메모리 정리',
+    'rotate_logs': '로그 로테이션',
+    'clear_cache': '캐시 클리어',
+    'auto_repair': 'Auto 수리'
+  };
+
+  if (!confirm(`${actionNames[action]}를 실행하시겠습니까?`)) return;
+
+  try {
+    const res = await fetch('/api/system/optimize', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({action})
+    });
+    const result = await res.json();
+
+    if (result.success) {
+      alert(`✅ ${actionNames[action]} 완료\n${result.message}`);
+    } else {
+      alert(`❌ ${actionNames[action]} 실패\n${result.message}`);
+    }
+  } catch (e) {
+    alert('요청 실패: ' + e);
+  }
+}
+
 // 자동 새로고침
 function startAutoRefresh() {
   setInterval(() => {
@@ -672,7 +892,7 @@ function startAutoRefresh() {
 
 // 차트 초기화 (Chart.js)
 function initCharts() {
-  // 수익 차트
+  // 수익 추이 차트
   const profitCtx = document.getElementById('profit-chart');
   if (profitCtx) {
     charts.profit = new Chart(profitCtx, {
@@ -681,10 +901,11 @@ function initCharts() {
         labels: Array.from({length: 14}, (_, i) => `${i+1}일`),
         datasets: [{
           label: '일별 수익',
-          data: Array.from({length: 14}, () => Math.random() * 5 - 1),
+          data: Array.from({length: 14}, () => 0),
           borderColor: '#03DAC6',
           backgroundColor: 'rgba(3,218,198,0.1)',
-          fill: true
+          fill: true,
+          tension: 0.4
         }]
       },
       options: {
@@ -698,10 +919,79 @@ function initCharts() {
       }
     });
   }
+
+  // 감성 분석 차트
+  const sentimentCtx = document.getElementById('sentiment-chart');
+  if (sentimentCtx) {
+    charts.sentiment = new Chart(sentimentCtx, {
+      type: 'radar',
+      data: {
+        labels: ['BTC', 'ETH', 'SOL', '전반적', '변동성', '거래량'],
+        datasets: [{
+          label: '시장 감성',
+          data: [65, 70, 80, 60, 75, 85],
+          borderColor: '#BB86FC',
+          backgroundColor: 'rgba(187,134,252,0.2)',
+          pointBackgroundColor: '#BB86FC'
+        }]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {legend: {display: false}},
+        scales: {
+          r: {
+            grid: {color: 'rgba(255,255,255,0.1)'},
+            pointLabels: {color: 'rgba(255,255,255,0.7)'},
+            ticks: {display: false}
+          }
+        }
+      }
+    });
+  }
+
+  // 초기 도넛 차트 생성
+  updateSystemMetrics({cpu: 0, memory: 0, disk: 0, docker: 0});
 }
 
-// 페이지 로드 완료 후 차트 초기화
-window.addEventListener('load', initCharts);
+// API 키 상태 조회
+async function loadApiKeyStatus() {
+  try {
+    const res = await fetch('/api/api-usage');
+    const data = await res.json();
+    API_USAGE = data;
+    updateApiUsageDisplay();
+  } catch (e) {
+    console.error('Failed to load API usage:', e);
+  }
+}
+
+// 자동 새로고침
+function startAutoRefresh() {
+  // 5초마다 봇 상태 업데이트
+  setInterval(() => {
+    updateOverview();
+    if (currentTab === 'stable' || currentTab === 'dopamine') {
+      renderBots();
+    }
+  }, 5000);
+
+  // 30초마다 거래소 잔액 업데이트
+  setInterval(() => {
+    updateExchangeBalances();
+  }, 30000);
+
+  // 60초마다 API 사용량 업데이트
+  setInterval(() => {
+    loadApiKeyStatus();
+  }, 60000);
+}
+
+// 페이지 로드 완료 후 실행
+window.addEventListener('load', () => {
+  initCharts();
+  loadApiKeyStatus();
+});
 </script>
 
 </body>

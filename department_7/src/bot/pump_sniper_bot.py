@@ -4,7 +4,7 @@ STEP 14: OZ_A2M 완결판
 
 설정:
 - 네트워크: Solana (Pump.fun)
-- Helius WebSocket 신규 토큰 감지
+- QuickNode WebSocket 신규 토큰 감지
 - 자동 익절 2~5배, 손절 -50%
 - 자본: 0.1 SOL
 - Mock 모드 지원
@@ -75,7 +75,7 @@ class PumpSniperBot:
     Pump.fun 스나이퍼 봇
 
     전략:
-    - Helius WebSocket으로 신규 토큰 실시간 감지
+    - QuickNode WebSocket으로 신규 토큰 실시간 감지
     - 초기 유동성 분석 후 스나이핑
     - 2~5배 익절, -50% 손절
     """
@@ -104,7 +104,7 @@ class PumpSniperBot:
 
         # 상태
         self.status = SniperStatus.IDLE
-        self.helius_ws = None
+        self.solana_ws = None
         self.wallet_address: Optional[str] = None
         self.active_snipes: Dict[str, TokenSnipe] = {}
         self.trades: List[SnipeTrade] = []
@@ -120,9 +120,12 @@ class PumpSniperBot:
         self.telegram_bot_token = os.environ.get("TELEGRAM_BOT_TOKEN")
         self.telegram_chat_id = os.environ.get("TELEGRAM_CHAT_ID")
 
-        # Helius
-        self.helius_rpc_url = os.environ.get("HELIUS_RPC_URL")
-        self.helius_ws_url = self.helius_rpc_url.replace("https://", "wss://") if self.helius_rpc_url else None
+        # QuickNode (HTTP + WSS URL 지원)
+        self.quicknode_http_url = os.environ.get("QUICKNODE_HTTP_URL")
+        self.quicknode_ws_url = os.environ.get("QUICKNODE_WSS_URL")
+        # WSS가 없으면 HTTP에서 변환
+        if not self.quicknode_ws_url and self.quicknode_http_url:
+            self.quicknode_ws_url = self.quicknode_http_url.replace("https://", "wss://")
 
         # 통계
         self.tokens_detected: int = 0
@@ -144,7 +147,7 @@ class PumpSniperBot:
         """봇 초기화"""
         self.wallet_address = self._load_wallet()
 
-        if self.mock_mode or not self.helius_ws_url:
+        if self.mock_mode or not self.quicknode_ws_url:
             await self._initialize_mock()
         else:
             await self._initialize_live()
@@ -159,7 +162,7 @@ class PumpSniperBot:
             self.event_bus = None
 
     async def _initialize_live(self):
-        """실제 Helius 연결 초기화 (rate limit 대응)"""
+        """실제 QuickNode 연결 초기화 (rate limit 대응)"""
         max_retries = 3
         retry_delay = 3  # 3초 대기
 
@@ -167,15 +170,15 @@ class PumpSniperBot:
             try:
                 # rate limit 방지를 위한 대기
                 if attempt > 0:
-                    logger.info(f"Retrying Helius connection in {retry_delay}s... (attempt {attempt + 1}/{max_retries})")
+                    logger.info(f"Retrying QuickNode connection in {retry_delay}s... (attempt {attempt + 1}/{max_retries})")
                     await asyncio.sleep(retry_delay)
 
                 # WebSocket 연결
                 import websockets
 
-                logger.info(f"Connecting to Helius WebSocket: {self.helius_ws_url}")
-                self.helius_ws = await websockets.connect(
-                    self.helius_ws_url,
+                logger.info(f"Connecting to QuickNode WebSocket: {self.quicknode_ws_url}")
+                self.solana_ws = await websockets.connect(
+                    self.quicknode_ws_url,
                     ping_interval=20,
                     ping_timeout=10
                 )
@@ -188,10 +191,10 @@ class PumpSniperBot:
                     "method": "programSubscribe",
                     "params": [pump_fun_program, {"encoding": "jsonParsed"}]
                 }
-                await self.helius_ws.send(json.dumps(subscribe_msg))
+                await self.solana_ws.send(json.dumps(subscribe_msg))
 
                 self.status = SniperStatus.RUNNING
-                logger.info("Pump.fun sniper live mode initialized")
+                logger.info("Pump.fun sniper live mode initialized (QuickNode)")
 
                 # 시작 알림
                 await self._send_telegram_notification(
@@ -203,7 +206,7 @@ class PumpSniperBot:
                 return
 
             except Exception as e:
-                logger.error(f"Failed to initialize Helius connection (attempt {attempt + 1}/{max_retries}): {e}")
+                logger.error(f"Failed to initialize QuickNode connection (attempt {attempt + 1}/{max_retries}): {e}")
                 if attempt < max_retries - 1:
                     retry_delay *= 2  # 지수 백오프
                 else:
@@ -251,7 +254,7 @@ class PumpSniperBot:
             raise
 
     async def _run_live_loop(self):
-        """실제 Helius WebSocket 루프"""
+        """실제 QuickNode WebSocket 루프"""
         try:
             import websockets
 
@@ -259,7 +262,7 @@ class PumpSniperBot:
                 try:
                     # WebSocket 메시지 수신
                     message = await asyncio.wait_for(
-                        self.helius_ws.recv(),
+                        self.solana_ws.recv(),
                         timeout=30.0
                     )
 
@@ -274,10 +277,10 @@ class PumpSniperBot:
 
                 except asyncio.TimeoutError:
                     # 하트비트 확인
-                    await self.helius_ws.ping()
+                    await self.solana_ws.ping()
 
         except websockets.exceptions.ConnectionClosed:
-            logger.error("Helius WebSocket connection closed")
+            logger.error("QuickNode WebSocket connection closed")
             await self._reconnect()
 
     async def _run_mock_loop(self):
@@ -489,9 +492,9 @@ class PumpSniperBot:
                 await self._sell_token(address, snipe, 0)
 
         # WebSocket 연결 해제
-        if self.helius_ws:
+        if self.solana_ws:
             try:
-                await self.helius_ws.close()
+                await self.solana_ws.close()
             except Exception as e:
                 logger.error(f"Error closing WebSocket: {e}")
 

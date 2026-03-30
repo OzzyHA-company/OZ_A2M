@@ -355,6 +355,20 @@ class ArbitrageBot:
             },
         }
 
+    def get_status(self) -> Dict[str, Any]:
+        """봇 상태 반환"""
+        return {
+            "bot_id": self.bot_id,
+            "bot_type": "arbitrage",
+            "status": "running" if self.running else "idle",
+            "mock_mode": False,
+            "symbol": self.symbol,
+            "exchanges": self.exchanges,
+            "daily_trades": self.daily_trades,
+            "total_profit": self.total_profit,
+            "timestamp": datetime.utcnow().isoformat(),
+        }
+
 
 async def main():
     """메인 실행"""
