@@ -25,6 +25,9 @@ from lib.core.logger import get_logger
 from department_1.src.monitoring.api_monitor import api_monitor
 from department_1.src.monitoring.log_viewer import log_viewer
 from department_1.src.monitoring.security_scanner import security_scanner
+from department_1.src.intel.intel_collector import intel_collector
+from department_2.src.verification_pipeline import verification_pipeline
+from department_5.src.performance_tracker import performance_tracker
 
 logger = get_logger(__name__)
 
@@ -1255,21 +1258,62 @@ async def background_updates():
 # D1: 관제탑센터 - 데이터 수집
 @app.get("/api/departments/1/status")
 async def get_department_1_status():
-    """제1부서: 관제탑센터 상태"""
+    """제1부서: 관제탑센터 상태 (실제 인텔 수집기 연동)"""
+    intel_stats = intel_collector.get_intel_stats()
+
     return {
         "department": "Control Tower Center",
         "data_sources": {
-            "connected": 7,
+            "connected": 4,
             "total": 7,
-            "exchanges": ["Binance", "Bybit", "Hyperliquid", "Polymarket", "Pump.fun", "GMGN", "News API"]
+            "exchanges": ["Binance", "Bybit", "Hyperliquid", "Polymarket"],
+            "intel_sources": ["News RSS", "On-chain", "Social"],
+            "intel_collected_24h": intel_stats.get('last_24h', 0)
         },
         "elasticsearch": {
             "status": "connected",
-            "indices": ["oz_a2m_logs", "oz_a2m_trades", "oz_a2m_signals"],
-            "document_count": 15420
+            "indices": ["oz_a2m_logs", "oz_a2m_trades", "oz_a2m_signals", "oz_a2m_intel"],
+            "document_count": 15420 + intel_stats.get('total', 0)
+        },
+        "intel_collector": {
+            "running": intel_collector._running,
+            "total_intel": intel_stats.get('total', 0),
+            "by_source": intel_stats.get('by_source', {})
         },
         "timestamp": datetime.utcnow().isoformat()
     }
+
+
+@app.get("/api/intel/feed")
+async def get_intel_feed(limit: int = 50, source: Optional[str] = None):
+    """인텔 피드 조회"""
+    return {
+        "intel": intel_collector.get_recent_intel(limit, source),
+        "stats": intel_collector.get_intel_stats(),
+        "timestamp": datetime.utcnow().isoformat()
+    }
+
+
+@app.post("/api/intel/start")
+async def start_intel_collection():
+    """인텔 수집 시작"""
+    await intel_collector.start()
+    return {
+        "success": True,
+        "message": "Intel collection started",
+        "sources": intel_collector.sources
+    }
+
+
+@app.post("/api/intel/stop")
+async def stop_intel_collection():
+    """인텔 수집 중지"""
+    await intel_collector.stop()
+    return {
+        "success": True,
+        "message": "Intel collection stopped"
+    }
+
 
 @app.post("/api/departments/1/query")
 async def query_elasticsearch(request: Request):
@@ -1277,23 +1321,84 @@ async def query_elasticsearch(request: Request):
     try:
         data = await request.json()
         query = data.get('query', '')
-        # TODO: 실제 Elasticsearch 쿼리 구현
+        # 실제 Elasticsearch 쿼리 구현 필요
         return {
             "query": query,
-            "results": [
-                {"timestamp": "2026-03-31T18:20:00", "level": "info", "message": "Bot started"},
-                {"timestamp": "2026-03-31T18:15:00", "level": "info", "message": "Trade executed"},
-            ],
-            "total": 2
+            "results": intel_collector.get_recent_intel(10),
+            "total": len(intel_collector.intel_feed)
         }
     except Exception as e:
         return {"error": str(e)}
 
+# 전역 파이프라인 인스턴스
+verification_pipeline = None
+
 # D2: 정보검증분석센터 - 검증/분석
+@app.get("/api/departments/2/status")
+async def get_department_2_status():
+    """제2부서: 정보검증분석센터 상태"""
+    global verification_pipeline
+
+    if verification_pipeline is None:
+        # 파이프라인 초기화
+        from department_2.src.verification_pipeline import VerificationPipeline
+        verification_pipeline = VerificationPipeline()
+
+    stats = verification_pipeline.get_stats()
+
+    return {
+        "department": "Verification & Analysis Center",
+        "pipeline": {
+            "running": stats.get('running', False),
+            "verifier_stats": stats.get('verifier', {}),
+        },
+        "data_sources": {
+            "raw_signals": "oz/a2m/signals/raw",
+            "verified_signals": "oz/a2m/signals/verified",
+            "rejected_signals": "oz/a2m/signals/rejected",
+        },
+        "timestamp": datetime.utcnow().isoformat()
+    }
+
+
+@app.post("/api/verification/pipeline/start")
+async def start_verification_pipeline():
+    """검증 파이프라인 시작"""
+    global verification_pipeline
+
+    if verification_pipeline is None:
+        from department_2.src.verification_pipeline import VerificationPipeline
+        verification_pipeline = VerificationPipeline()
+
+    if not verification_pipeline._running:
+        asyncio.create_task(verification_pipeline.start())
+
+    return {
+        "success": True,
+        "message": "Verification pipeline started",
+        "status": "running"
+    }
+
+
+@app.post("/api/verification/pipeline/stop")
+async def stop_verification_pipeline():
+    """검증 파이프라인 중지"""
+    global verification_pipeline
+
+    if verification_pipeline and verification_pipeline._running:
+        await verification_pipeline.stop()
+
+    return {
+        "success": True,
+        "message": "Verification pipeline stopped",
+        "status": "stopped"
+    }
+
+
 @app.get("/api/verification/signals")
 async def get_verification_signals():
     """제2부서: 생성된 매매 신호 조회"""
-    # Mock 데이터 - 실제로는 signal_generator에서 가져옴
+    # 샘플 신호 데이터
     signals = [
         {
             "id": "sig_001",
@@ -1447,24 +1552,54 @@ async def get_department_4_status():
 # D5: 성과분석 - 성과/PnL (기존 profit API 확장)
 @app.get("/api/departments/5/status")
 async def get_department_5_status():
-    """제5부서: 일일 성과분석 대책개선팀 상태"""
-    # 현재 수익 데이터 가져오기
-    bots_pnl = {}
-    for bot_id, bot_data in bot_manager.bots.items():
-        bot = bot_data['instance']
-        status = bot.get_status()
-        bots_pnl[bot_id] = status.get('pnl', 0)
+    """제5부서: 일일 성과분석 대책개선팀 상태 (실제 성과 추적기 연동)"""
+    now = datetime.utcnow()
+    monthly_summary = performance_tracker.get_monthly_summary(now.year, now.month)
 
     return {
         "department": "Daily PnL & Strategy Team",
-        "daily_pnl": bot_manager.daily_profits[-1] if bot_manager.daily_profits else 0,
-        "total_pnl": sum(bots_pnl.values()),
-        "by_bot": bots_pnl,
-        "calendar_events": [
-            {"date": "2026-03-31", "type": "report", "title": "Daily PnL Report"},
-            {"date": "2026-03-30", "type": "analysis", "title": "Strategy Review"},
-        ]
+        "current_month": monthly_summary,
+        "performance_tracker": {
+            "total_days_recorded": len(performance_tracker.daily_data),
+            "data_directory": str(performance_tracker.data_dir)
+        },
+        "timestamp": datetime.utcnow().isoformat()
     }
+
+
+@app.get("/api/performance/calendar")
+async def get_performance_calendar(year: Optional[int] = None, month: Optional[int] = None):
+    """PnL 캘린더 데이터"""
+    now = datetime.utcnow()
+    year = year or now.year
+    month = month or now.month
+
+    calendar = performance_tracker.get_calendar_data(year, month)
+    summary = performance_tracker.get_monthly_summary(year, month)
+
+    return {
+        "year": year,
+        "month": month,
+        "calendar": calendar,
+        "summary": summary,
+        "timestamp": datetime.utcnow().isoformat()
+    }
+
+
+@app.get("/api/performance/range")
+async def get_performance_range(
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None
+):
+    """기간별 성과 조회"""
+    performances = performance_tracker.get_performance_range(start_date, end_date)
+    return {
+        "start_date": start_date,
+        "end_date": end_date,
+        "performances": performances,
+        "count": len(performances)
+    }
+
 
 @app.post("/api/departments/5/report")
 async def generate_performance_report(request: Request):
@@ -1472,14 +1607,57 @@ async def generate_performance_report(request: Request):
     try:
         data = await request.json()
         report_type = data.get('type', 'daily')
-        # TODO: 실제 리포트 생성
+        start_date = data.get('start_date')
+        end_date = data.get('end_date')
+
+        # 기간 설정
+        if not start_date:
+            start_date = (datetime.utcnow() - timedelta(days=30)).strftime('%Y-%m-%d')
+        if not end_date:
+            end_date = datetime.utcnow().strftime('%Y-%m-%d')
+
+        # 리포트 생성
+        report = performance_tracker.generate_report(start_date, end_date)
+
         return {
             "status": "generated",
             "type": report_type,
+            "report": report,
             "url": f"/reports/{report_type}_{datetime.utcnow().strftime('%Y%m%d')}.pdf",
             "timestamp": datetime.utcnow().isoformat()
         }
     except Exception as e:
+        logger.error(f"Report generation error: {e}")
+        return {"error": str(e)}
+
+
+@app.post("/api/performance/record")
+async def record_performance(request: Request):
+    """일일 성과 기록"""
+    try:
+        data = await request.json()
+
+        perf = performance_tracker.record_daily_performance(
+            date=data.get('date', datetime.utcnow().strftime('%Y-%m-%d')),
+            pnl=data.get('pnl', 0),
+            trades=data.get('trades', 0),
+            win_count=data.get('win_count', 0),
+            loss_count=data.get('loss_count', 0),
+            capital=data.get('capital', 0),
+            bots_performance=data.get('bots_performance', {})
+        )
+
+        return {
+            "success": True,
+            "performance": {
+                "date": perf.date,
+                "pnl": perf.pnl,
+                "pnl_pct": perf.pnl_pct,
+                "trades": perf.trades
+            }
+        }
+    except Exception as e:
+        logger.error(f"Performance recording error: {e}")
         return {"error": str(e)}
 
 # D6: 연구개발팀 - R&D
