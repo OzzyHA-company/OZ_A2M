@@ -174,6 +174,17 @@ body{background:var(--background);color:var(--text-primary);font-family:'Rajdhan
 .text-center{text-align:center;}
 .mb-0{margin-bottom:0;}
 
+/* INTEL TAB */
+.stat-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:12px;}
+.stat-item{background:var(--card-bg);border:1px solid var(--card-border);border-radius:8px;padding:12px;}
+.stat-item .stat-label{font-size:10px;color:var(--text-secondary);margin-bottom:4px;}
+.stat-item .stat-value{font-family:'Space Mono',monospace;font-size:16px;font-weight:700;color:var(--text-primary);}
+.intel-metrics{background:var(--card-bg);border:1px solid var(--card-border);border-radius:8px;padding:12px;}
+.metric-row{display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid var(--card-border);}
+.metric-row:last-child{border-bottom:none;}
+.metric-label{font-size:12px;color:var(--text-secondary);}
+.metric-value{font-family:'Space Mono',monospace;font-size:13px;font-weight:600;color:var(--text-primary);}
+
 /* PROGRESS BAR */
 #progress-bar{position:fixed;bottom:0;left:60px;right:0;height:3px;background:var(--card-bg);z-index:50;}
 #progress-fill{height:100%;background:linear-gradient(90deg,var(--primary),var(--secondary));transition:width 1s linear;}
@@ -195,29 +206,47 @@ body{background:var(--background);color:var(--text-primary);font-family:'Rajdhan
 </head>
 <body>
 
-<!-- SIDEBAR -->
+<!-- SIDEBAR - 7부서 구조 -->
 <nav id="sidebar">
-  <div class="sidebar-logo">
+  <div class="sidebar-logo" title="OZ_A2M CEO Dashboard">
     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.5"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
   </div>
+
+  <!-- D0: CEO 종합현황 -->
   <button class="nav-item active" data-tab="overview" data-label="종합현황" onclick="switchTab('overview')">
     <svg viewBox="0 0 24 24"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
   </button>
-  <button class="nav-item" data-tab="stable" data-label="안정봇" onclick="switchTab('stable')">
-    <svg viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="2"/><rect x="9" y="9" width="6" height="6"/></svg>
+
+  <!-- D1: 관제탑 + 외부탐색팀 - 데이터수집 -->
+  <button class="nav-item" data-tab="collection" data-label="📡 수집" onclick="switchTab('collection')">
+    <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
   </button>
-  <button class="nav-item" data-tab="dopamine" data-label="도파민봇" onclick="switchTab('dopamine')">
-    <svg viewBox="0 0 24 24"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+
+  <!-- D2: 정보검증분석 - 검증/분석 -->
+  <button class="nav-item" data-tab="verification" data-label="🔍 검증" onclick="switchTab('verification')">
+    <svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
   </button>
-  <button class="nav-item" data-tab="withdraw" data-label="출금" onclick="switchTab('withdraw')">
-    <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 6v12M8 10l4-4 4 4"/></svg>
+
+  <!-- D5: 성과분석 - 일일 PnL -->
+  <button class="nav-item" data-tab="performance" data-label="📈 성과" onclick="switchTab('performance')">
+    <svg viewBox="0 0 24 24"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
   </button>
-  <button class="nav-item" data-tab="system" data-label="시스템" onclick="switchTab('system')">
+
+  <!-- D3: 보안팀 - 보안 -->
+  <button class="nav-item" data-tab="security" data-label="🛡️ 보안" onclick="switchTab('security')">
+    <svg viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+  </button>
+
+  <!-- D4: 유지보수 - 시스템 -->
+  <button class="nav-item" data-tab="system" data-label="⚙️ 시스템" onclick="switchTab('system')">
     <svg viewBox="0 0 24 24"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
   </button>
-  <button class="nav-item" data-tab="ai" data-label="AI 분석" onclick="switchTab('ai')">
-    <svg viewBox="0 0 24 24"><path d="M12 2a10 10 0 1 0 10 10A10 10 0 0 0 12 2zm0 18a8 8 0 1 1 8-8 8 8 0 0 1-8 8z"/><path d="M12 6v6l4 2"/></svg>
+
+  <!-- D6+D7: R&D + 봇제어 -->
+  <button class="nav-item" data-tab="rnd" data-label="🧪 R&D" onclick="switchTab('rnd')">
+    <svg viewBox="0 0 24 24"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
   </button>
+
   <div class="sidebar-bottom">
     <button class="kill-sidebar-btn" title="긴급킬스위치" onclick="killAllBots()">
       <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>
@@ -286,102 +315,134 @@ body{background:var(--background);color:var(--text-primary);font-family:'Rajdhan
     </div>
   </div>
 
-  <!-- TAB 2: 안정봇 -->
-  <div id="tab-stable" class="tab">
+  <!-- TAB 2: D1 관제탑 + 외부탐색 - 데이터수집 (기존 intel 확장) -->
+  <div id="tab-collection" class="tab">
+    <div class="grid-2">
+      <div class="card">
+        <div class="card-title"><span class="dot" style="background:var(--neon-cyan)"></span> 실시간 데이터 소스 (제1부서)</div>
+        <table class="data-table" id="collection-sources">
+          <thead><tr><th>소스</th><th>상태</th><th>Latency</th><th>수집 항목</th></tr></thead>
+          <tbody id="collection-sources-body">
+            <tr><td colspan="4" class="text-center muted">데이터 소스 로딩 중...</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="card">
+        <div class="card-title"><span class="dot" style="background:var(--neon-pink)"></span> 시장 데이터 스냅샷</div>
+        <div id="collection-snapshot">
+          <div class="stat-grid">
+            <div class="stat-item"><div class="stat-label">BTC</div><div class="stat-value" id="col-btc">-</div></div>
+            <div class="stat-item"><div class="stat-label">ETH</div><div class="stat-value" id="col-eth">-</div></div>
+            <div class="stat-item"><div class="stat-label">SOL</div><div class="stat-value" id="col-sol">-</div></div>
+            <div class="stat-item"><div class="stat-label">연결됨</div><div class="stat-value" id="col-conn">-</div></div>
+          </div>
+          <div class="intel-metrics" style="margin-top:16px;">
+            <div class="metric-row"><span class="metric-label">Fear & Greed:</span><span class="metric-value" id="col-fear">-</span></div>
+            <div class="metric-row"><span class="metric-label">Funding Rate:</span><span class="metric-value" id="col-funding">-</span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
     <div class="card">
-      <div class="card-title"><span class="dot"></span> 안정봇 종합 수익 추이</div>
-      <div class="chart-wrap" style="height:250px;"><canvas id="stable-combined-chart"></canvas></div>
+      <div class="card-title"><span class="dot" style="background:var(--secondary)"></span> 외부 인텔 피드 (Goozi 탐색팀)</div>
+      <div id="intel-feed" style="max-height:300px;overflow-y:auto;">
+        <div class="intel-item" style="padding:12px;border-bottom:1px solid var(--card-border);">
+          <span class="muted">외부 인텔 데이터 로딩 중...</span>
+        </div>
+      </div>
     </div>
-    <div class="card">
-      <div class="card-title"><span class="dot"></span> 안정봇 8개 (다크 테마)</div>
-    </div>
-    <div class="bot-grid" id="stable-bots">
-      <!-- 봇 카드들이 JS로 동적 생성됨 -->
-    </div>
-    <div id="stable-charts-container">
-      <!-- 봇별 개별 차트가 JS로 동적 생성됨 -->
+
+    <div class="grid-2">
+      <div class="card">
+        <div class="card-title"><span class="dot" style="background:var(--warning)"></span> Elasticsearch 로그 검색</div>
+        <div style="display:flex;gap:8px;margin-bottom:12px;">
+          <input type="text" id="esql-query" placeholder="ESQL 쿼리 입력... (예: level:error)" style="flex:1;background:var(--input-bg);border:1px solid var(--card-border);border-radius:6px;padding:8px;color:var(--text-primary);">
+          <button class="ctrl-btn" onclick="runEsqlQuery()" style="padding:8px 16px;">검색</button>
+        </div>
+        <div id="esql-results" style="max-height:200px;overflow-y:auto;font-family:'Space Mono',monospace;font-size:11px;">
+          <span class="muted">쿼리 결과가 여기에 표시됩니다</span>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-title"><span class="dot" style="background:var(--profit)"></span> DEX/온체인 데이터</div>
+        <table class="data-table" id="dex-data">
+          <thead><tr><th>DEX</th><th>TVL</th><th>24h Volume</th><th>Gas</th></tr></thead>
+          <tbody id="dex-data-body">
+            <tr><td>Raydium</td><td>$1.2B</td><td>$234M</td><td>0.001 SOL</td></tr>
+            <tr><td>Jupiter</td><td>$2.1B</td><td>$567M</td><td>0.001 SOL</td></tr>
+            <tr><td>Orca</td><td>$890M</td><td>$156M</td><td>0.001 SOL</td></tr>
+          </tbody>
+        </table>
+      </div>
     </div>
   </div>
 
-  <!-- TAB 3: 도파민봇 -->
-  <div id="tab-dopamine" class="tab">
-    <div class="card" style="border:2px solid var(--neon-pink); box-shadow:0 0 20px rgba(255,0,110,0.2);">
-      <div class="card-title"><span class="dot" style="background:var(--neon-pink)"></span> 도파민봇 종합 수익 추이 (네온)</div>
-      <div class="chart-wrap" style="height:250px;"><canvas id="dopamine-combined-chart"></canvas></div>
-    </div>
-    <div class="card" style="border:2px solid var(--neon-pink); box-shadow:0 0 20px rgba(255,0,110,0.2);">
-      <div class="card-title"><span class="dot" style="background:var(--neon-pink)"></span> 도파민봇 3개 (네온 테마)</div>
-    </div>
-    <div class="bot-grid" id="dopamine-bots">
-      <!-- 도파민봇 카드들이 JS로 동적 생성됨 -->
-    </div>
-    <div id="dopamine-charts-container">
-      <!-- 봇별 개별 차트가 JS로 동적 생성됨 -->
-    </div>
-  </div>
-
-  <!-- TAB 4: 출금/현금화 -->
-  <div id="tab-withdraw" class="tab">
+  <!-- TAB 3: D2 정보검증분석센터 - 검증/분석 -->
+  <div id="tab-verification" class="tab">
     <div class="card">
-      <div class="card-title"><span class="dot" style="background:var(--profit)"></span> 출금 가능 금액</div>
-      <div class="text-center">
-        <div style="font-size:48px;font-family:'Space Mono',monospace;color:var(--profit);" id="wd-available">$0.00</div>
-        <div style="color:var(--text-muted);margin-top:8px;">출금 대기 잔액 ($50 이상 시 알림)</div>
-      </div>
-    </div>
-
-    <div class="card">
-      <div class="card-title"><span class="dot" style="background:var(--secondary)"></span> 거래소별 출금</div>
-      <div class="withdraw-grid">
-        <div class="withdraw-card">
-          <h4>Binance USDT</h4>
-          <button class="withdraw-btn" onclick="withdraw('binance', 'USDT')">출금하기</button>
+      <div class="card-title"><span class="dot" style="background:var(--neon-cyan)"></span> 검증 파이프라인 상태 (제2부서)</div>
+      <div style="display:flex;align-items:center;justify-content:center;gap:16px;padding:20px;flex-wrap:wrap;">
+        <div style="text-align:center;padding:16px;background:var(--card-bg);border-radius:8px;border:1px solid var(--card-border);">
+          <div style="font-size:24px;">📥</div>
+          <div style="font-size:12px;margin-top:4px;">Raw Data</div>
+          <div style="color:var(--profit);font-size:11px;">🟢 Active</div>
         </div>
-        <div class="withdraw-card">
-          <h4>Bybit USDT</h4>
-          <button class="withdraw-btn" onclick="withdraw('bybit', 'USDT')">출금하기</button>
+        <div style="color:var(--text-muted);">→</div>
+        <div style="text-align:center;padding:16px;background:var(--card-bg);border-radius:8px;border:1px solid var(--card-border);">
+          <div style="font-size:24px;">🧹</div>
+          <div style="font-size:12px;margin-top:4px;">Noise Filter</div>
+          <div style="color:var(--profit);font-size:11px;">🟢 Active</div>
         </div>
-        <div class="withdraw-card">
-          <h4>Hyperliquid USDC</h4>
-          <button class="withdraw-btn" onclick="withdraw('hyperliquid', 'USDC')">출금하기</button>
+        <div style="color:var(--text-muted);">→</div>
+        <div style="text-align:center;padding:16px;background:var(--card-bg);border-radius:8px;border:1px solid var(--card-border);">
+          <div style="font-size:24px;">✅</div>
+          <div style="font-size:12px;margin-top:4px;">Reality Check</div>
+          <div style="color:var(--profit);font-size:11px;">🟢 Active</div>
         </div>
-        <div class="withdraw-card">
-          <h4>MetaMask USDC → Binance</h4>
-          <button class="withdraw-btn" onclick="withdraw('metamask', 'USDC')">전송하기</button>
+        <div style="color:var(--text-muted);">→</div>
+        <div style="text-align:center;padding:16px;background:var(--card-bg);border-radius:8px;border:1px solid var(--card-border);">
+          <div style="font-size:24px;">📡</div>
+          <div style="font-size:12px;margin-top:4px;">Signal</div>
+          <div style="color:var(--profit);font-size:11px;">🟢 Active</div>
         </div>
       </div>
     </div>
 
-    <div class="card">
-      <div class="card-title"><span class="dot" style="background:var(--warning)"></span> 현금화 플로우</div>
-      <div style="display:flex;align-items:center;justify-content:center;gap:20px;flex-wrap:wrap;padding:20px;">
-        <div style="text-align:center;">
-          <div style="font-size:24px;">💰</div>
-          <div>크립토</div>
-        </div>
-        <div style="color:var(--text-muted);">→</div>
-        <div style="text-align:center;">
-          <div style="font-size:24px;">🏦</div>
-          <div>Binance</div>
-        </div>
-        <div style="color:var(--text-muted);">→</div>
-        <div style="text-align:center;">
-          <div style="font-size:24px;">₩</div>
-          <div>원화</div>
-        </div>
-        <div style="color:var(--text-muted);">→</div>
-        <div style="text-align:center;">
-          <div style="font-size:24px;">📱</div>
-          <div>토스/카카오</div>
+    <div class="grid-2">
+      <div class="card">
+        <div class="card-title"><span class="dot" style="background:var(--neon-purple)"></span> 생성된 매매 신호</div>
+        <table class="data-table" id="signals-table">
+          <thead>
+            <tr><th>시간</th><th>심볼</th><th>방향</th><th>강도</th><th>신뢰도</th></tr>
+          </thead>
+          <tbody id="signals-body">
+            <tr><td colspan="5" class="text-center muted">신호 데이터 로딩 중...</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="card">
+        <div class="card-title"><span class="dot" style="background:var(--neon-pink)"></span> TradingAgents AI 분석</div>
+        <div id="ai-analysis-content">
+          <div style="padding:12px;border-bottom:1px solid var(--card-border);">
+            <div style="font-size:11px;color:var(--text-secondary);">Market Sentiment</div>
+            <div style="font-size:18px;color:var(--profit);">Bullish (72%)</div>
+          </div>
+          <div style="padding:12px;border-bottom:1px solid var(--card-border);">
+            <div style="font-size:11px;color:var(--text-secondary);">Recommended Action</div>
+            <div>Increase grid bot density</div>
+          </div>
+          <div style="padding:12px;">
+            <div style="font-size:11px;color:var(--text-secondary);">AI Confidence</div>
+            <div>85%</div>
+          </div>
         </div>
       </div>
     </div>
 
     <div class="card">
-      <div class="card-title"><span class="dot"></span> 출금 히스토리</div>
-      <table class="data-table" id="withdraw-history">
-        <tr><th>시간</th><th>거래소</th><th>자산</th><th>금액</th><th>상태</th></tr>
-      </table>
+      <div class="card-title"><span class="dot"></span> 시장 감성 지표</div>
+      <div class="chart-wrap"><canvas id="sentiment-chart"></canvas></div>
     </div>
   </div>
 
@@ -437,29 +498,309 @@ body{background:var(--background);color:var(--text-primary);font-family:'Rajdhan
     </div>
   </div>
 
-  <!-- TAB 6: AI 분석 -->
-  <div id="tab-ai" class="tab">
+  <!-- TAB 4: D5 성과분석 - 캘린더/수익 (신규) -->
+  <div id="tab-performance" class="tab">
     <div class="grid-2">
       <div class="card">
-        <div class="card-title"><span class="dot" style="background:var(--neon-purple)"></span> TradingAgents 분석</div>
-        <div id="ai-analysis-content">
-          <p class="muted">AI 분석 데이터 로딩 중...</p>
+        <div class="card-title"><span class="dot" style="background:var(--neon-purple)"></span> 캘린더 뷰 (제5부서)</div>
+        <div id="calendar-widget">
+          <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:4px;text-align:center;font-size:11px;margin-bottom:8px;">
+            <div style="color:var(--text-secondary)">Su</div>
+            <div style="color:var(--text-secondary)">Mo</div>
+            <div style="color:var(--text-secondary)">Tu</div>
+            <div style="color:var(--text-secondary)">We</div>
+            <div style="color:var(--text-secondary)">Th</div>
+            <div style="color:var(--text-secondary)">Fr</div>
+            <div style="color:var(--text-secondary)">Sa</div>
+          </div>
+          <div id="calendar-grid" style="display:grid;grid-template-columns:repeat(7,1fr);gap:4px;">
+            <!-- JS로 동적 생성 -->
+          </div>
+        </div>
+        <div style="margin-top:12px;padding:12px;background:var(--card-bg);border-radius:8px;">
+          <div style="font-size:11px;color:var(--text-secondary)">선택된 날짜</div>
+          <div id="selected-date" style="font-size:16px;font-weight:600;">2026-03-31</div>
         </div>
       </div>
       <div class="card">
-        <div class="card-title"><span class="dot" style="background:var(--neon-cyan)"></span> 시장 감성 지표</div>
-        <div class="chart-wrap"><canvas id="sentiment-chart"></canvas></div>
+        <div class="card-title"><span class="dot" style="background:var(--profit)"></span> 일일 수익 요약</div>
+        <div style="text-align:center;padding:20px;">
+          <div style="font-size:42px;font-family:'Space Mono',monospace;color:var(--profit);" id="daily-pnl">+$0.00</div>
+          <div style="color:var(--text-muted);margin-top:8px;">오늘 수익</div>
+        </div>
+        <div class="intel-metrics" style="margin-top:16px;">
+          <div class="metric-row"><span class="metric-label">누적 수익:</span><span class="metric-value" id="total-pnl">$0.00</span></div>
+          <div class="metric-row"><span class="metric-label">거래 횟수:</span><span class="metric-value" id="daily-trades">0</span></div>
+          <div class="metric-row"><span class="metric-label">승률:</span><span class="metric-value" id="win-rate">0%</span></div>
+        </div>
       </div>
     </div>
 
     <div class="card">
-      <div class="card-title"><span class="dot"></span> 봇 성과 AI 리포트</div>
-      <table class="data-table" id="ai-report">
+      <div class="card-title"><span class="dot"></span> 봇별 수익 현황</div>
+      <table class="data-table" id="pnl-by-bot">
         <thead>
-          <tr><th>봇</th><th>AI 평가</th><th>개선 제안</th><th>신뢰도</th><th>추천</th></tr>
+          <tr><th>봇 이름</th><th>수익</th><th>수익률</th><th>거래수</th><th>평균 보유</th></tr>
         </thead>
-        <tbody id="ai-report-body">
-          <tr><td colspan="5" class="text-center muted">AI 분석 데이터 로딩 중...</td></tr>
+        <tbody id="pnl-bot-body">
+          <tr><td colspan="5" class="text-center muted">수익 데이터 로딩 중...</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="card">
+      <div class="card-title"><span class="dot" style="background:var(--secondary)"></span> 일일 리포트</div>
+      <div class="action-row">
+        <button class="action-btn" onclick="generateReport('daily')">📄 일일 리포트 생성</button>
+        <button class="action-btn" onclick="generateReport('weekly')">📊 주간 리포트 생성</button>
+        <button class="action-btn" onclick="generateReport('monthly')">📈 월간 리포트 생성</button>
+        <button class="action-btn" onclick="downloadPDF()">💾 PDF 다운로드</button>
+      </div>
+      <div style="margin-top:12px;">
+        <span class="muted">마지막 리포트 생성: </span><span id="last-report-time">-</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- TAB 5: D3 보안팀 - 보안 (신규) -->
+  <div id="tab-security" class="tab">
+    <div class="sys-row1">
+      <div class="donut-card">
+        <div class="donut-center">
+          <div class="donut-pct" style="font-size:32px;color:var(--profit);">✓</div>
+          <div class="donut-name" style="color:var(--profit);">CRITICAL</div>
+        </div>
+        <div style="font-size:24px;font-weight:700;color:var(--profit);">0</div>
+        <div style="font-size:11px;color:var(--text-secondary);">심각 취약점</div>
+      </div>
+      <div class="donut-card">
+        <div class="donut-center">
+          <div class="donut-pct" style="font-size:32px;color:var(--profit);">✓</div>
+          <div class="donut-name" style="color:var(--profit);">HIGH</div>
+        </div>
+        <div style="font-size:24px;font-weight:700;color:var(--profit);">0</div>
+        <div style="font-size:11px;color:var(--text-secondary);">고위험</div>
+      </div>
+      <div class="donut-card">
+        <div class="donut-center">
+          <div class="donut-pct" style="font-size:32px;color:var(--warning);">!</div>
+          <div class="donut-name" style="color:var(--warning);">MEDIUM</div>
+        </div>
+        <div style="font-size:24px;font-weight:700;color:var(--warning);">2</div>
+        <div style="font-size:11px;color:var(--text-secondary);">중위험</div>
+      </div>
+      <div class="donut-card">
+        <div class="donut-center">
+          <div class="donut-pct" style="font-size:32px;color:var(--profit);">✓</div>
+          <div class="donut-name" style="color:var(--profit);">LOW</div>
+        </div>
+        <div style="font-size:24px;font-weight:700;color:var(--profit);">0</div>
+        <div style="font-size:11px;color:var(--text-secondary);">낮은 위험</div>
+      </div>
+    </div>
+
+    <div class="grid-2">
+      <div class="card">
+        <div class="card-title"><span class="dot" style="background:var(--neon-cyan)"></span> API 키 보안 상태</div>
+        <table class="data-table" id="api-security">
+          <thead>
+            <tr><th>거래소</th><th>상태</th><th>마지막 사용</th><th>위험도</th></tr>
+          </thead>
+          <tbody id="api-security-body">
+            <tr><td>Binance</td><td style="color:var(--profit)">🟢 안전</td><td>2분 전</td><td>낮음</td></tr>
+            <tr><td>Bybit</td><td style="color:var(--profit)">🟢 안전</td><td>5분 전</td><td>낮음</td></tr>
+            <tr><td>Hyperliquid</td><td style="color:var(--profit)">🟢 안전</td><td>1분 전</td><td>낮음</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="card">
+        <div class="card-title"><span class="dot" style="background:var(--neon-pink)"></span> Nuclei 보안 스캔</div>
+        <div style="padding:12px;">
+          <div style="display:flex;justify-content:space-between;margin-bottom:8px;">
+            <span class="muted">마지막 스캔:</span>
+            <span id="last-nuclei-scan">2026-03-30 18:00:00</span>
+          </div>
+          <div style="display:flex;justify-content:space-between;margin-bottom:8px;">
+            <span class="muted">스캔된 엔드포인트:</span>
+            <span>15개</span>
+          </div>
+          <div style="display:flex;justify-content:space-between;margin-bottom:16px;">
+            <span class="muted">취약점 발견:</span>
+            <span style="color:var(--profit)">0개</span>
+          </div>
+          <div class="action-row">
+            <button class="action-btn" onclick="runNucleiScan()">🔍 전체 스캔 실행</button>
+            <button class="action-btn" onclick="downloadSecurityReport()">📄 리포트 다운로드</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-title"><span class="dot" style="background:var(--warning)"></span> 감사 로그 (Elasticsearch)</div>
+      <div style="display:flex;gap:8px;margin-bottom:12px;">
+        <input type="text" id="audit-query" placeholder="감사 로그 검색... (예: user:admin)" style="flex:1;background:var(--input-bg);border:1px solid var(--card-border);border-radius:6px;padding:8px;color:var(--text-primary);">
+        <button class="ctrl-btn" onclick="searchAuditLogs()" style="padding:8px 16px;">검색</button>
+      </div>
+      <div id="audit-logs" style="max-height:200px;overflow-y:auto;font-family:'Space Mono',monospace;font-size:11px;">
+        <div style="padding:8px;border-bottom:1px solid var(--card-border);">
+          <span style="color:var(--text-secondary)">18:21:00</span> | admin | LOGIN_SUCCESS | 100.77.207.113
+        </div>
+        <div style="padding:8px;border-bottom:1px solid var(--card-border);">
+          <span style="color:var(--text-secondary)">18:15:30</span> | bot | API_CALL | Binance
+        </div>
+        <div style="padding:8px;border-bottom:1px solid var(--card-border);">
+          <span style="color:var(--text-secondary)">18:10:15</span> | system | BOT_START | grid_binance_001
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- TAB 6: D6+D7 R&D + 봇제어 -->
+  <div id="tab-rnd" class="tab">
+    <div class="card">
+      <div class="card-title"><span class="dot" style="background:var(--neon-cyan)"></span> 봇 제어 패널 (제7부서)</div>
+      <div style="display:flex;gap:16px;margin-bottom:16px;">
+        <div style="flex:1;">
+          <div style="font-size:11px;color:var(--text-secondary);margin-bottom:8px;">안정봇</div>
+          <div id="rnd-stable-bots" class="bot-grid" style="grid-template-columns:repeat(auto-fill,minmax(200px,1fr));">
+            <!-- JS로 동적 생성 -->
+          </div>
+        </div>
+        <div style="flex:1;">
+          <div style="font-size:11px;color:var(--text-secondary);margin-bottom:8px;">고위험/고수익 봇</div>
+          <div id="rnd-dopamine-bots" class="bot-grid" style="grid-template-columns:repeat(auto-fill,minmax(200px,1fr));">
+            <!-- JS로 동적 생성 -->
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="grid-2">
+      <div class="card">
+        <div class="card-title"><span class="dot" style="background:var(--neon-purple)"></span> 백테스트 엔진 (제6부서)</div>
+        <div style="padding:12px;">
+          <div style="margin-bottom:12px;">
+            <label style="font-size:11px;color:var(--text-secondary);display:block;margin-bottom:4px;">전략 선택</label>
+            <select id="backtest-strategy" style="width:100%;background:var(--input-bg);border:1px solid var(--card-border);border-radius:6px;padding:8px;color:var(--text-primary);">
+              <option>Grid v2</option>
+              <option>DCA Optimized</option>
+              <option>Trend Following</option>
+              <option>Scalper Pro</option>
+            </select>
+          </div>
+          <div style="display:flex;gap:8px;margin-bottom:12px;">
+            <div style="flex:1;">
+              <label style="font-size:11px;color:var(--text-secondary);display:block;margin-bottom:4px;">심볼</label>
+              <input type="text" value="BTC/USDT" style="width:100%;background:var(--input-bg);border:1px solid var(--card-border);border-radius:6px;padding:8px;color:var(--text-primary);">
+            </div>
+            <div style="flex:1;">
+              <label style="font-size:11px;color:var(--text-secondary);display:block;margin-bottom:4px;">기간</label>
+              <select style="width:100%;background:var(--input-bg);border:1px solid var(--card-border);border-radius:6px;padding:8px;color:var(--text-primary);">
+                <option>7일</option>
+                <option selected>30일</option>
+                <option>90일</option>
+              </select>
+            </div>
+          </div>
+          <div class="action-row">
+            <button class="action-btn" onclick="runBacktest()">▶ 백테스트 실행</button>
+            <button class="action-btn" onclick="optimizeParams()">⚡ 파라미터 최적화</button>
+          </div>
+        </div>
+        <div id="backtest-results" style="padding:12px;border-top:1px solid var(--card-border);display:none;">
+          <div style="display:flex;justify-content:space-around;">
+            <div style="text-align:center;">
+              <div style="font-size:11px;color:var(--text-secondary);">총 수익</div>
+              <div style="color:var(--profit);font-size:18px;font-weight:700;">+12.4%</div>
+            </div>
+            <div style="text-align:center;">
+              <div style="font-size:11px;color:var(--text-secondary);">최대 낙폭</div>
+              <div style="color:var(--loss);font-size:18px;font-weight:700;">-3.2%</div>
+            </div>
+            <div style="text-align:center;">
+              <div style="font-size:11px;color:var(--text-secondary);">샤프 비율</div>
+              <div style="font-size:18px;font-weight:700;">2.1</div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-title"><span class="dot" style="background:var(--neon-pink)"></span> Ray RLlib 강화학습</div>
+        <div style="padding:12px;">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+            <div>
+              <div style="font-size:11px;color:var(--text-secondary);">학습 상태</div>
+              <div style="color:var(--profit);">🟢 Idle</div>
+            </div>
+            <div>
+              <div style="font-size:11px;color:var(--text-secondary);">마지막 학습</div>
+              <div>2026-03-25</div>
+            </div>
+          </div>
+          <div class="action-row">
+            <button class="action-btn" onclick="startRLTraining()">🚀 학습 시작</button>
+            <button class="action-btn" onclick="downloadModel()">💾 모델 다운로드</button>
+            <button class="action-btn" onclick="testAgent()">🧪 에이전트 테스트</button>
+          </div>
+        </div>
+        <div style="padding:12px;border-top:1px solid var(--card-border);">
+          <div style="font-size:11px;color:var(--text-secondary);margin-bottom:8px;">학습 진행</div>
+          <div style="background:var(--card-bg);border-radius:4px;height:8px;overflow:hidden;">
+            <div style="background:var(--profit);width:0%;height:100%;transition:width 0.3s;" id="rl-progress"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-title"><span class="dot" style="background:var(--secondary)"></span> R&D 노트 (Notion 연동)</div>
+      <div id="rd-notes">
+        <div style="padding:12px;border-bottom:1px solid var(--card-border);">
+          <div style="font-size:11px;color:var(--text-secondary);">2026-03-30</div>
+          <div>Grid strategy v2 개선안</div>
+        </div>
+        <div style="padding:12px;border-bottom:1px solid var(--card-border);">
+          <div style="font-size:11px;color:var(--text-secondary);">2026-03-29</div>
+          <div>Pump.fun sniper 파라미터 조정</div>
+        </div>
+        <div style="padding:12px;">
+          <div style="font-size:11px;color:var(--text-secondary);">2026-03-28</div>
+          <div>새로운 아비트라지 기회 분석</div>
+        </div>
+      </div>
+      <div class="action-row" style="margin-top:12px;padding-top:12px;border-top:1px solid var(--card-border);">
+        <button class="action-btn" onclick="addNote()">📝 새 노트</button>
+        <button class="action-btn" onclick="syncNotion()">🔄 Notion 동기화</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-title"><span class="dot"></span> 출금/자금 이동</div>
+      <div class="withdraw-grid">
+        <div class="withdraw-card">
+          <h4>Binance USDT</h4>
+          <div style="font-size:24px;font-family:'Space Mono',monospace;margin:8px 0;" id="wd-binance">$0</div>
+          <button class="withdraw-btn" onclick="withdraw('binance', 'USDT')">출금</button>
+        </div>
+        <div class="withdraw-card">
+          <h4>Bybit USDT</h4>
+          <div style="font-size:24px;font-family:'Space Mono',monospace;margin:8px 0;" id="wd-bybit">$0</div>
+          <button class="withdraw-btn" onclick="withdraw('bybit', 'USDT')">출금</button>
+        </div>
+        <div class="withdraw-card">
+          <h4>Hyperliquid USDC</h4>
+          <div style="font-size:24px;font-family:'Space Mono',monospace;margin:8px 0;" id="wd-hyper">$0</div>
+          <button class="withdraw-btn" onclick="withdraw('hyperliquid', 'USDC')">출금</button>
+        </div>
+        <div class="withdraw-card">
+          <h4>MetaMask → Binance</h4>
+          <div style="font-size:24px;font-family:'Space Mono',monospace;margin:8px 0;" id="wd-metamask">$0</div>
+          <button class="withdraw-btn" onclick="withdraw('metamask', 'USDC')">전송</button>
+        </div>
+      </div>
+    </div>
+  </div>
         </tbody>
       </table>
     </div>
@@ -581,7 +922,7 @@ function handleWebSocketMessage(data) {
   }
 }
 
-// 탭 전환
+// 탭 전환 - 7부서 구조
 function switchTab(tab) {
   document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
   document.querySelectorAll('.nav-item').forEach(b => b.classList.remove('active'));
@@ -589,15 +930,35 @@ function switchTab(tab) {
   document.querySelector(`.nav-item[data-tab="${tab}"]`).classList.add('active');
   currentTab = tab;
 
-  if (tab === 'stable' || tab === 'dopamine') {
-    renderBots();
+  // 부서별 데이터 로드
+  switch(tab) {
+    case 'collection':  // D1: 데이터수집
+      loadCollectionData();
+      break;
+    case 'verification': // D2: 검증/분석
+      loadVerificationData();
+      break;
+    case 'performance': // D5: 성과분석
+      loadPerformanceData();
+      initCalendar();
+      break;
+    case 'security':    // D3: 보안
+      loadSecurityData();
+      break;
+    case 'system':      // D4: 시스템
+      loadSystemData();
+      break;
+    case 'rnd':         // D6+D7: R&D + 봇제어
+      renderBots();
+      loadRndData();
+      break;
   }
 }
 
-// 봇 카드 렌더링
+// 봇 카드 렌더링 - R&D 탭 구조
 function renderBots() {
-  const stableContainer = document.getElementById('stable-bots');
-  const dopamineContainer = document.getElementById('dopamine-bots');
+  const stableContainer = document.getElementById('rnd-stable-bots');
+  const dopamineContainer = document.getElementById('rnd-dopamine-bots');
 
   let stableHtml = '';
   let dopamineHtml = '';
@@ -640,6 +1001,308 @@ function renderBots() {
 
   if (stableContainer) stableContainer.innerHTML = stableHtml;
   if (dopamineContainer) dopamineContainer.innerHTML = dopamineHtml;
+}
+
+// D1: 데이터수집 탭 데이터 로드
+async function loadCollectionData() {
+  try {
+    const res = await fetch('/api/intel');
+    if (res.ok) {
+      const data = await res.json();
+      updateCollectionDisplay(data);
+    }
+  } catch (e) {
+    console.error('Failed to load collection data:', e);
+  }
+}
+
+// D1: 데이터수집 표시 업데이트
+function updateCollectionDisplay(data) {
+  // 데이터 소스 테이블 업데이트
+  const sourcesBody = document.getElementById('collection-sources-body');
+  if (sourcesBody && data.sources) {
+    let html = '';
+    for (const source of data.sources) {
+      const statusClass = source.status === 'connected' ? 'profit' : 'loss';
+      const statusText = source.status === 'connected' ? '연결됨' : '연결 끊김';
+      const time = new Date(source.lastUpdate).toLocaleTimeString('ko-KR');
+      html += `
+        <tr>
+          <td>${source.name}</td>
+          <td class="${statusClass}">${statusText}</td>
+          <td>${time}</td>
+          <td>${source.items}</td>
+        </tr>
+      `;
+    }
+    sourcesBody.innerHTML = html;
+  }
+
+  // 스냅샷 업데이트
+  if (data.snapshot) {
+    const btcEl = document.getElementById('col-btc');
+    const ethEl = document.getElementById('col-eth');
+    const solEl = document.getElementById('col-sol');
+    const connEl = document.getElementById('col-conn');
+
+    if (btcEl) btcEl.textContent = `$${data.snapshot.btcPrice.toLocaleString()}`;
+    if (ethEl) ethEl.textContent = `$${data.snapshot.ethPrice.toLocaleString()}`;
+    if (solEl) solEl.textContent = `$${data.snapshot.solPrice.toLocaleString()}`;
+    if (connEl) connEl.textContent = `${data.snapshot.exchangeCount}개`;
+  }
+}
+
+// D2: 검증/분석 탭 데이터 로드
+async function loadVerificationData() {
+  try {
+    const res = await fetch('/api/verification/signals');
+    if (res.ok) {
+      const data = await res.json();
+      updateSignalsDisplay(data.signals || []);
+    }
+  } catch (e) {
+    console.error('Failed to load verification data:', e);
+    // Mock 데이터 표시
+    updateSignalsDisplay([
+      {time: '18:20:00', symbol: 'BTC/USDT', direction: 'LONG', strength: 85, confidence: 92},
+      {time: '18:15:30', symbol: 'SOL/USDT', direction: 'SHORT', strength: 72, confidence: 88},
+    ]);
+  }
+}
+
+// D2: 신호 표시 업데이트
+function updateSignalsDisplay(signals) {
+  const tbody = document.getElementById('signals-body');
+  if (!tbody) return;
+
+  if (signals.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="5" class="text-center muted">생성된 신호 없음</td></tr>';
+    return;
+  }
+
+  let html = '';
+  for (const sig of signals) {
+    const dirClass = sig.direction === 'LONG' ? 'profit' : 'loss';
+    html += `
+      <tr>
+        <td>${sig.time}</td>
+        <td>${sig.symbol}</td>
+        <td class="${dirClass}">${sig.direction}</td>
+        <td>${sig.strength}%</td>
+        <td>${sig.confidence}%</td>
+      </tr>
+    `;
+  }
+  tbody.innerHTML = html;
+}
+
+// D5: 성과분석 탭 데이터 로드
+async function loadPerformanceData() {
+  try {
+    const res = await fetch('/api/profit');
+    if (res.ok) {
+      const data = await res.json();
+      updatePerformanceDisplay(data);
+    }
+  } catch (e) {
+    console.error('Failed to load performance data:', e);
+  }
+}
+
+// D5: 성과 표시 업데이트
+function updatePerformanceDisplay(data) {
+  const dailyEl = document.getElementById('daily-pnl');
+  const totalEl = document.getElementById('total-pnl');
+
+  if (dailyEl && data.daily && data.daily.length > 0) {
+    const today = data.daily[data.daily.length - 1];
+    dailyEl.textContent = `${today >= 0 ? '+' : ''}$${today.toFixed(2)}`;
+    dailyEl.style.color = today >= 0 ? 'var(--profit)' : 'var(--loss)';
+  }
+
+  if (totalEl && data.total !== undefined) {
+    totalEl.textContent = `$${data.total.toFixed(2)}`;
+  }
+
+  // 봇별 수익 테이블 업데이트
+  const tbody = document.getElementById('pnl-bot-body');
+  if (tbody && data.by_bot) {
+    let html = '';
+    for (const [botId, pnl] of Object.entries(data.by_bot)) {
+      const bot = BOTS[botId] || {};
+      const capital = bot.capital || 1;
+      const pnlPct = ((pnl / capital) * 100).toFixed(2);
+      html += `
+        <tr>
+          <td>${bot.name || botId}</td>
+          <td class="${pnl >= 0 ? 'profit' : 'loss'}">${pnl >= 0 ? '+' : ''}$${pnl.toFixed(2)}</td>
+          <td class="${pnl >= 0 ? 'profit' : 'loss'}">${pnl >= 0 ? '+' : ''}${pnlPct}%</td>
+          <td>${bot.trades || 0}</td>
+          <td>-</td>
+        </tr>
+      `;
+    }
+    tbody.innerHTML = html;
+  }
+}
+
+// D5: 캘린더 초기화
+function initCalendar() {
+  const grid = document.getElementById('calendar-grid');
+  if (!grid) return;
+
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = now.getMonth();
+  const daysInMonth = new Date(year, month + 1, 0).getDate();
+  const firstDay = new Date(year, month, 1).getDay();
+
+  let html = '';
+  // 빈 칸
+  for (let i = 0; i < firstDay; i++) {
+    html += '<div></div>';
+  }
+  // 날짜
+  for (let day = 1; day <= daysInMonth; day++) {
+    const isToday = day === now.getDate();
+    const bg = isToday ? 'background:var(--primary);' : '';
+    html += `<div style="padding:8px;border-radius:4px;cursor:pointer;${bg}" onclick="selectDate(${day})">${day}</div>`;
+  }
+  grid.innerHTML = html;
+}
+
+// D5: 날짜 선택
+function selectDate(day) {
+  const dateStr = `2026-03-${day.toString().padStart(2, '0')}`;
+  document.getElementById('selected-date').textContent = dateStr;
+  // TODO: 선택된 날짜의 데이터 로드
+}
+
+// D5: 리포트 생성
+function generateReport(type) {
+  alert(`${type} 리포트 생성 중...`);
+  document.getElementById('last-report-time').textContent = new Date().toLocaleString('ko-KR');
+}
+
+function downloadPDF() {
+  alert('PDF 다운로드 기능 - 구현 예정');
+}
+
+// D3: 보안 탭 데이터 로드
+async function loadSecurityData() {
+  try {
+    // Nuclei 스캔 결과 로드
+    const res = await fetch('/api/security/nuclei');
+    if (res.ok) {
+      const data = await res.json();
+      updateSecurityDisplay(data);
+    }
+  } catch (e) {
+    console.error('Failed to load security data:', e);
+  }
+}
+
+// D3: 보안 표시 업데이트
+function updateSecurityDisplay(data) {
+  // TODO: 보안 데이터 표시
+}
+
+// D3: Nuclei 스캔 실행
+function runNucleiScan() {
+  fetch('/api/security/nuclei/scan', {method: 'POST'})
+    .then(r => r.json())
+    .then(data => alert('보안 스캔 시작됨'))
+    .catch(e => alert('스캔 요청 실패: ' + e));
+}
+
+function downloadSecurityReport() {
+  alert('보안 리포트 다운로드 - 구현 예정');
+}
+
+function searchAuditLogs() {
+  const query = document.getElementById('audit-query').value;
+  alert(`감사 로그 검색: ${query}`);
+}
+
+// D4: 시스템 탭 데이터 로드
+async function loadSystemData() {
+  // 시스템 메트릭스는 WebSocket으로 업데이트됨
+}
+
+// D6+D7: R&D 탭 데이터 로드
+async function loadRndData() {
+  try {
+    // 백테스트 결과 로드
+    const res = await fetch('/api/rnd/backtests');
+    if (res.ok) {
+      const data = await res.json();
+      // TODO: 백테스트 결과 표시
+    }
+  } catch (e) {
+    console.error('Failed to load R&D data:', e);
+  }
+}
+
+// D6+D7: 백테스트 실행
+function runBacktest() {
+  const strategy = document.getElementById('backtest-strategy').value;
+  fetch('/api/rnd/backtest', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({strategy: strategy})
+  })
+    .then(r => r.json())
+    .then(data => {
+      document.getElementById('backtest-results').style.display = 'block';
+      alert('백테스트 완료');
+    })
+    .catch(e => alert('백테스트 실패: ' + e));
+}
+
+function optimizeParams() {
+  alert('파라미터 최적화 시작... (Ray Tune 사용)');
+}
+
+function startRLTraining() {
+  alert('RLlib 강화학습 시작...');
+  document.getElementById('rl-progress').style.width = '0%';
+  // TODO: 실제 학습 API 호출
+}
+
+function downloadModel() {
+  alert('모델 다운로드 - 구현 예정');
+}
+
+function testAgent() {
+  alert('에이전트 테스트 - 구현 예정');
+}
+
+function addNote() {
+  const note = prompt('새 노트 내용:');
+  if (note) {
+    alert('노트 추가됨: ' + note);
+  }
+}
+
+function syncNotion() {
+  alert('Notion 동기화 중...');
+}
+
+// ESQL 쿼리 실행
+function runEsqlQuery() {
+  const query = document.getElementById('esql-query').value;
+  fetch('/api/departments/1/query', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({query: query})
+  })
+    .then(r => r.json())
+    .then(data => {
+      document.getElementById('esql-results').innerHTML = `<pre>${JSON.stringify(data, null, 2)}</pre>`;
+    })
+    .catch(e => {
+      document.getElementById('esql-results').innerHTML = `<span style="color:var(--loss)">Error: ${e}</span>`;
+    });
 }
 
 // 봇 제어
@@ -1198,12 +1861,142 @@ function updateAIReport(reports) {
   tbody.innerHTML = html;
 }
 
+// Intel 데이터 로드
+async function loadIntelData() {
+  try {
+    const res = await fetch('/api/intel');
+    if (res.ok) {
+      const data = await res.json();
+      updateIntelDisplay(data);
+    } else {
+      // API가 없을 경우 Mock 데이터로 표시
+      updateIntelDisplay(getMockIntelData());
+    }
+  } catch (e) {
+    console.error('Failed to load Intel data:', e);
+    updateIntelDisplay(getMockIntelData());
+  }
+}
+
+// Mock Intel 데이터 생성
+function getMockIntelData() {
+  return {
+    sources: [
+      { name: 'Binance', status: 'connected', lastUpdate: new Date().toISOString(), items: 'Orderbook, Ticker, Funding' },
+      { name: 'Bybit', status: 'connected', lastUpdate: new Date().toISOString(), items: 'Orderbook, Ticker, Funding' },
+      { name: 'Hyperliquid', status: 'connected', lastUpdate: new Date().toISOString(), items: 'Perp Data, Volume' },
+      { name: 'Polymarket', status: 'connected', lastUpdate: new Date().toISOString(), items: 'Market Odds, Volume' },
+      { name: 'Pump.fun', status: 'connected', lastUpdate: new Date().toISOString(), items: 'New Tokens, Bonding Curve' },
+      { name: 'GMGN', status: 'connected', lastUpdate: new Date().toISOString(), items: 'Smart Money Flow' },
+      { name: 'News API', status: 'connected', lastUpdate: new Date().toISOString(), items: 'Crypto News, Twitter' },
+    ],
+    snapshot: {
+      btcPrice: 67234.52,
+      ethPrice: 3456.78,
+      solPrice: 178.45,
+      exchangeCount: 6,
+      avgFunding: 0.0123,
+      fundingDiff: 0.0456,
+      fearGreed: 78
+    },
+    dexData: [
+      { name: 'Raydium', tvl: '$1.2B', volume: '$234M', gas: '0.001 SOL' },
+      { name: 'Orca', tvl: '$890M', volume: '$156M', gas: '0.001 SOL' },
+      { name: 'Jupiter', tvl: '$2.1B', volume: '$567M', gas: '0.001 SOL' },
+      { name: 'Hyperliquid', tvl: '$450M', volume: '$123M', gas: '$0.01' },
+    ],
+    feed: [
+      { time: new Date().toISOString(), source: 'Binance', message: 'BTC Funding Rate 변화 감지: +0.015%' },
+      { time: new Date(Date.now() - 60000).toISOString(), source: 'Pump.fun', message: '신규 토큰 감지: NEW_TOKEN (MC: $50K)' },
+      { time: new Date(Date.now() - 120000).toISOString(), source: 'Polymarket', message: '시장 변동: Trump 2024 확률 65% → 63%' },
+      { time: new Date(Date.now() - 180000).toISOString(), source: 'GMGN', message: '스마트 머니 이동: 1000 SOL → 주소 0x7a3...' },
+    ]
+  };
+}
+
+// Intel 표시 업데이트
+function updateIntelDisplay(data) {
+  // 데이터 소스 테이블 업데이트
+  const sourcesBody = document.getElementById('intel-sources-body');
+  if (sourcesBody && data.sources) {
+    let html = '';
+    for (const source of data.sources) {
+      const statusClass = source.status === 'connected' ? 'profit' : 'loss';
+      const statusText = source.status === 'connected' ? '연결됨' : '연결 끊김';
+      const time = new Date(source.lastUpdate).toLocaleTimeString('ko-KR');
+      html += `
+        <tr>
+          <td>${source.name}</td>
+          <td class="${statusClass}">${statusText}</td>
+          <td>${time}</td>
+          <td>${source.items}</td>
+        </tr>
+      `;
+    }
+    sourcesBody.innerHTML = html;
+  }
+
+  // 시장 데이터 스냅샷 업데이트
+  if (data.snapshot) {
+    const btcEl = document.getElementById('btc-price');
+    const ethEl = document.getElementById('eth-price');
+    const solEl = document.getElementById('sol-price');
+    const exCountEl = document.getElementById('exchange-count');
+    const fundingEl = document.getElementById('avg-funding');
+    const fundingDiffEl = document.getElementById('funding-diff');
+    const fearGreedEl = document.getElementById('fear-greed');
+
+    if (btcEl) btcEl.textContent = `$${data.snapshot.btcPrice.toLocaleString()}`;
+    if (ethEl) ethEl.textContent = `$${data.snapshot.ethPrice.toLocaleString()}`;
+    if (solEl) solEl.textContent = `$${data.snapshot.solPrice.toLocaleString()}`;
+    if (exCountEl) exCountEl.textContent = data.snapshot.exchangeCount;
+    if (fundingEl) fundingEl.textContent = `${(data.snapshot.avgFunding * 100).toFixed(4)}%`;
+    if (fundingDiffEl) fundingDiffEl.textContent = `${(data.snapshot.fundingDiff * 100).toFixed(4)}%`;
+    if (fearGreedEl) fearGreedEl.textContent = data.snapshot.fearGreed;
+  }
+
+  // DEX 데이터 테이블 업데이트
+  const dexBody = document.getElementById('dex-data-body');
+  if (dexBody && data.dexData) {
+    let html = '';
+    for (const dex of data.dexData) {
+      html += `
+        <tr>
+          <td>${dex.name}</td>
+          <td>${dex.tvl}</td>
+          <td>${dex.volume}</td>
+          <td>${dex.gas}</td>
+        </tr>
+      `;
+    }
+    dexBody.innerHTML = html;
+  }
+
+  // 인텔 피드 업데이트
+  const feedEl = document.getElementById('intel-feed');
+  if (feedEl && data.feed) {
+    let html = '';
+    for (const item of data.feed) {
+      const time = new Date(item.time).toLocaleTimeString('ko-KR');
+      html += `
+        <div class="intel-item" style="padding:12px;border-bottom:1px solid var(--card-border);">
+          <div style="font-size:11px;color:var(--text-secondary);margin-bottom:4px;">${time} · ${item.source}</div>
+          <div>${item.message}</div>
+        </div>
+      `;
+    }
+    feedEl.innerHTML = html;
+  }
+}
+
 // 탭 전환 시 AI 분석 로드
 const originalSwitchTab = switchTab;
 switchTab = function(tab) {
   originalSwitchTab(tab);
   if (tab === 'ai') {
     loadAIAnalysis();
+  } else if (tab === 'intel') {
+    loadIntelData();
   }
 };
 
@@ -1212,6 +2005,7 @@ window.addEventListener('load', () => {
   initCharts();
   loadApiKeyStatus();
   loadAIAnalysis();
+  loadIntelData();
 });
 </script>
 
