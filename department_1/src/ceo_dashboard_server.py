@@ -22,6 +22,8 @@ project_root = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(project_root))
 
 from lib.core.logger import get_logger
+from department_1.src.monitoring.api_monitor import api_monitor
+from department_1.src.monitoring.log_viewer import log_viewer
 
 logger = get_logger(__name__)
 
@@ -584,8 +586,58 @@ async def toggle_telegram(request: TelegramToggleRequest):
 
 @app.get("/api/api-usage")
 async def get_api_usage():
-    """API 사용량 현황"""
-    return bot_manager.api_usage
+    """API 사용량 현황 (상세)"""
+    return {
+        "summary": bot_manager.api_usage,
+        "detailed": api_monitor.get_metrics(),
+        "timestamp": datetime.utcnow().isoformat()
+    }
+
+
+@app.get("/api/api-usage/{exchange}")
+async def get_api_usage_detail(exchange: str):
+    """특정 거래소 API 사용량 상세"""
+    return api_monitor.get_metrics(exchange)
+
+
+@app.get("/api/api-calls/{exchange}")
+async def get_api_calls(exchange: str, limit: int = 100):
+    """최근 API 호출 기록"""
+    return {
+        "exchange": exchange,
+        "calls": api_monitor.get_recent_calls(exchange, limit)
+    }
+
+
+@app.get("/api/logs")
+async def get_logs():
+    """로그 파일 목록"""
+    return {"files": log_viewer.list_log_files()}
+
+
+@app.get("/api/logs/{filename}")
+async def get_log_content(filename: str, lines: int = 100):
+    """로그 파일 내용"""
+    return {
+        "filename": filename,
+        "lines": log_viewer.get_log_tail(filename, lines)
+    }
+
+
+@app.post("/api/logs/rotate")
+async def rotate_logs():
+    """로그 로테이션 실행"""
+    rotated = await log_viewer.rotate_logs()
+    return {"success": True, "rotated": rotated}
+
+
+@app.get("/api/errors")
+async def get_recent_errors(level: str = "ERROR", minutes: int = 60):
+    """최근 에러 로그"""
+    return {
+        "level": level,
+        "errors": log_viewer.get_logs_by_level(level, minutes)
+    }
 
 
 @app.post("/api/system/optimize")
@@ -791,8 +843,13 @@ async def background_updates():
 async def startup_event():
     """서버 시작 시 실행"""
     logger.info("CEO Dashboard Server starting...")
+
+    # API 모니터 시작
+    await api_monitor.start()
+
     # 초기 거래소 잔액 조회
     await bot_manager.update_exchange_balances()
+
     # 백그라운드 태스크 시작
     asyncio.create_task(background_updates())
 
