@@ -598,7 +598,7 @@ class BybitScalpingBot:
     async def _update_balance(self):
         """잔고 업데이트"""
         try:
-            balance = self.exchange.fetch_balance()
+            balance = await self.exchange.fetch_balance()
             self.balance = balance["USDT"]["free"] if "USDT" in balance else 0.0
         except ccxt.NetworkError as e:
             logger.warning(f"Network error updating balance: {e}")

@@ -31,6 +31,7 @@ from lib.core.logger import get_logger
 from lib.messaging.mqtt_client import MQTTClient, MQTTConfig
 from lib.messaging.event_bus import EventBus, get_event_bus
 from occore.control_tower.llm_analyzer import LLMAnalyzer
+from occore.control_tower.alert_manager import AlertManager
 from occore.verification.signal_generator import SignalGenerator
 
 logger = get_logger(__name__)
@@ -119,7 +120,8 @@ class PolymarketAIBot:
         self.trades: List[PolymarketTrade] = []
 
         # AI 컴포넌트
-        self.llm_analyzer = LLMAnalyzer()
+        self.alert_manager = AlertManager()
+        self.llm_analyzer = LLMAnalyzer(alert_manager=self.alert_manager)
         self.signal_generator = SignalGenerator()
 
         # MQTT

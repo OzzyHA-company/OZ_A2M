@@ -91,8 +91,8 @@ class TriangularArbBot:
         exchange_id: str = "binance",
         capital: float = 10.35,
         min_profit_pct: float = 0.001,  # 0.1%
-        base_currency: str = "BTC",
-        arb_path: List[str] = None,  # ["ETH", "BNB"]
+        base_currency: str = "USDT",
+        arb_path: List[str] = None,  # ["BTC", "ETH"]
         sandbox: bool = False,
         mqtt_host: str = "localhost",
         mqtt_port: int = 1883,
@@ -117,6 +117,9 @@ class TriangularArbBot:
         # 아비트라지 경로 설정
         self.full_path = [base_currency] + self.arb_path + [base_currency]
         self.symbols = self._build_symbols()
+
+        # 유효한 심볼인지 확인
+        logger.info(f"Arbitrage symbols: {self.symbols}")
 
         # 수수료 설정 (Binance 기준)
         self.trading_fee_pct = 0.001  # 0.1%
@@ -149,13 +152,45 @@ class TriangularArbBot:
         logger.info(f"TriangularArbBot {bot_id} initialized (path: {' -> '.join(self.full_path)})")
 
     def _build_symbols(self) -> List[str]:
-        """아비트라지 경로의 거래쌍 생성"""
+        """아비트라지 경로의 거래쌍 생성 (Binance 실제 존재 심볼)"""
         symbols = []
-        for i in range(len(self.full_path) - 1):
-            base = self.full_path[i]
-            quote = self.full_path[i + 1]
-            # Binance 형식: BTC/ETH, ETH/BNB 등
-            symbols.append(f"{base}/{quote}")
+        path = self.full_path
+
+        # Binance에서 실제 존재하는 심볼 조합
+        # USDT -> BTC -> ETH -> USDT 경로:
+        # 1. BTC/USDT (USDT로 BTC 매수)
+        # 2. ETH/BTC (BTC로 ETH 매수)
+        # 3. ETH/USDT (ETH를 USDT로 매도)
+        for i in range(len(path) - 1):
+            curr = path[i]
+            next_curr = path[i + 1]
+
+            # 일반적인 심볼 조합 시도
+            symbol1 = f"{next_curr}/{curr}"  # 예: BTC/USDT
+            symbol2 = f"{curr}/{next_curr}"  # 예: USDT/BTC (역방향)
+
+            # Binance에서 일반적으로 사용되는 형식 선택
+            # USDT가 quote인 경우가 더 일반적
+            if curr == "USDT":
+                symbols.append(f"{next_curr}/USDT")
+            elif next_curr == "USDT":
+                symbols.append(f"{curr}/USDT")
+            elif curr == "BTC" and next_curr == "ETH":
+                symbols.append("ETH/BTC")  # ETH/BTC 존재
+            elif curr == "ETH" and next_curr == "BTC":
+                symbols.append("ETH/BTC")
+            elif curr == "BTC" and next_curr == "BNB":
+                symbols.append("BNB/BTC")
+            elif curr == "BNB" and next_curr == "BTC":
+                symbols.append("BNB/BTC")
+            elif curr == "ETH" and next_curr == "BNB":
+                symbols.append("BNB/ETH")
+            elif curr == "BNB" and next_curr == "ETH":
+                symbols.append("BNB/ETH")
+            else:
+                # 기본적으로 USDT 마켓 사용
+                symbols.append(f"{next_curr}/USDT")
+
         return symbols
 
     def _load_api_keys(self) -> tuple:

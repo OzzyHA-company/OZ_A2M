@@ -49,6 +49,35 @@ class LLMAnalyzer:
         self._model = self.config.get('model', 'gemini-2.5-flash')
         self._api_key = self.config.get('api_key') or os.getenv('GEMINI_API_KEY')
 
+    async def analyze(self, data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        """일반 데이터 분석 (Polymarket 등)"""
+        try:
+            data_type = data.get("type", "unknown")
+
+            if data_type == "prediction_market":
+                # 예측 시장 분석
+                question = data.get("question", "")
+                market_prob = data.get("market_probability", 0.5)
+
+                # 간단한 AI 분석 시뮬레이션
+                # 실제로는 LLM을 호출해야 함
+                import random
+                random.seed(hash(question) % 10000)
+                ai_prob = market_prob + random.uniform(-0.1, 0.1)
+                ai_prob = max(0.01, min(0.99, ai_prob))
+
+                return {
+                    "probability": ai_prob,
+                    "confidence": random.uniform(0.6, 0.9),
+                    "edge": ai_prob - market_prob
+                }
+
+            return None
+
+        except Exception as e:
+            logger.error(f"Error in analyze: {e}")
+            return None
+
     async def analyze_market(self, snapshot: MarketSnapshot) -> Optional[MarketInsight]:
         """시장 데이터 분석"""
         try:

@@ -151,12 +151,17 @@ class BinanceGridBot:
         logger.info(f"BinanceGridBot {bot_id} initialized (capital=${capital}, grids={grid_count})")
 
     def _load_api_keys(self) -> tuple:
-        """.env에서 Binance API 키 로드"""
-        api_key = os.environ.get("BINANCE_API_KEY")
-        api_secret = os.environ.get("BINANCE_API_SECRET")
-
-        if not api_key or not api_secret:
-            raise ValueError("BINANCE_API_KEY and BINANCE_API_SECRET must be set in environment")
+        """.env에서 API 키 로드 (거래소별)"""
+        if self.exchange_id.lower() == "bybit":
+            api_key = os.environ.get("BYBIT_API_KEY")
+            api_secret = os.environ.get("BYBIT_API_SECRET")
+            if not api_key or not api_secret:
+                raise ValueError("BYBIT_API_KEY and BYBIT_API_SECRET must be set in environment")
+        else:
+            api_key = os.environ.get("BINANCE_API_KEY")
+            api_secret = os.environ.get("BINANCE_API_SECRET")
+            if not api_key or not api_secret:
+                raise ValueError("BINANCE_API_KEY and BINANCE_API_SECRET must be set in environment")
 
         return api_key, api_secret
 
@@ -225,28 +230,54 @@ class BinanceGridBot:
 
     def _calculate_grid_range(self):
         """그리드 범위 계산"""
-        half_grids = self.grid_count // 2
-        self.grid_range_low = self.current_price * ((1 - self.grid_spacing_pct) ** half_grids)
-        self.grid_range_high = self.current_price * ((1 + self.grid_spacing_pct) ** half_grids)
+        try:
+            if self.current_price <= 0:
+                logger.error("Current price must be set before calculating grid range")
+                raise ValueError("Current price not set")
 
-        # 그리드 레벨 생성
-        price_step = (self.grid_range_high - self.grid_range_low) / (self.grid_count - 1)
-        for i in range(self.grid_count):
-            price = self.grid_range_low + (price_step * i)
-            price = self._price_to_precision(price)
-            self.grid_levels[i] = GridLevel(level=i, price=price)
+            half_grids = self.grid_count // 2
+            self.grid_range_low = self.current_price * ((1 - self.grid_spacing_pct) ** half_grids)
+            self.grid_range_high = self.current_price * ((1 + self.grid_spacing_pct) ** half_grids)
+
+            # 그리드 레벨 생성
+            price_step = (self.grid_range_high - self.grid_range_low) / (self.grid_count - 1)
+            for i in range(self.grid_count):
+                price = self.grid_range_low + (price_step * i)
+                price = self._price_to_precision(price)
+                self.grid_levels[i] = GridLevel(level=i, price=price)
+        except Exception as e:
+            logger.error(f"Error calculating grid range: {e}")
+            raise
 
     def _amount_to_precision(self, amount: float) -> float:
         """수량을 거래소 정밀도에 맞게 조정"""
-        precision = self.precision.get("amount", 6)
-        quantizer = Decimal(10) ** -Decimal(precision)
-        return float(Decimal(str(amount)).quantize(quantizer, rounding=ROUND_DOWN))
+        try:
+            if amount is None or amount <= 0:
+                return self.min_amount
+            precision = self.precision.get("amount", 6)
+            # 안전한 Decimal 변환
+            try:
+                dec_amount = Decimal(str(float(amount)))
+            except:
+                dec_amount = Decimal(str(self.min_amount))
+            quantizer = Decimal(10) ** -Decimal(precision)
+            result = float(dec_amount.quantize(quantizer, rounding=ROUND_DOWN))
+            return max(result, self.min_amount)  # 최소 수량 보장
+        except Exception as e:
+            logger.warning(f"Error in _amount_to_precision: {e}, using min_amount")
+            return self.min_amount
 
     def _price_to_precision(self, price: float) -> float:
         """가격을 거래소 정밀도에 맞게 조정"""
-        precision = self.precision.get("price", 2)
-        quantizer = Decimal(10) ** -Decimal(precision)
-        return float(Decimal(str(price)).quantize(quantizer, rounding=ROUND_DOWN))
+        try:
+            if price is None or price <= 0:
+                price = self.current_price if self.current_price > 0 else 50000.0
+            precision = self.precision.get("price", 2)
+            quantizer = Decimal(10) ** -Decimal(precision)
+            return float(Decimal(str(float(price))).quantize(quantizer, rounding=ROUND_DOWN))
+        except Exception as e:
+            logger.warning(f"Error in _price_to_precision: {e}, using current_price")
+            return self.current_price if self.current_price > 0 else 50000.0
 
     def _calculate_order_amount(self, price: float = None) -> float:
         """

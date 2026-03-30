@@ -132,17 +132,18 @@ class TestTriangularArbBot:
         assert bot.status == ArbStatus.IDLE
 
     def test_arb_path_building(self):
-        """아비트라지 경로 생성 테스트"""
+        """아비트라지 경로 생성 테스트 (Binance 실제 존재 심볼)"""
         bot = TriangularArbBot(
-            base_currency="BTC",
-            arb_path=["ETH", "BNB"],
+            base_currency="USDT",
+            arb_path=["BTC", "ETH"],
             capital=20.0,
             sandbox=True,
             telegram_alerts=False
         )
 
-        assert bot.full_path == ["BTC", "ETH", "BNB", "BTC"]
-        assert bot.symbols == ["BTC/ETH", "ETH/BNB", "BNB/BTC"]
+        assert bot.full_path == ["USDT", "BTC", "ETH", "USDT"]
+        # Binance 실제 존재 심볼: BTC/USDT, ETH/BTC, ETH/USDT
+        assert bot.symbols == ["BTC/USDT", "ETH/BTC", "ETH/USDT"]
 
     def test_arb_opportunity_creation(self):
         """아비트라지 기회 생성 테스트"""
