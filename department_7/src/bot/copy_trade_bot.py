@@ -6,7 +6,7 @@ STEP 14: OZ_A2M 완결판
 - Solana 스마트머니 지갑 추적
 - Helius Parse TX API 사용
 - 자동 거래 복사
-- 자본: 0.1 SOL
+- 자본: 0.067 SOL
 - Mock 모드 지원
 """
 
@@ -78,7 +78,7 @@ class GMGNCopyBot:
     def __init__(
         self,
         bot_id: str = "gmgn_copy_001",
-        capital_sol: float = 0.1,
+        capital_sol: float = 0.067,
         copy_percentage: float = 0.1,  # 원 거래의 10% 복사
         max_position_pct: float = 0.1,  # 최대 10% 자본
         min_wallet_success_rate: float = 0.6,  # 60% 이상 승률
@@ -434,8 +434,8 @@ async def main():
     """단독 실행용"""
     bot = GMGNCopyBot(
         bot_id="gmgn_copy_001",
-        capital_sol=0.1,
-        mock_mode=True
+        capital_sol=0.067,
+        mock_mode=False
     )
 
     try:

@@ -1,0 +1,708 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>OZ_A2M CEO Dashboard</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@400;500;600;700&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0;}
+html,body{height:100%;overflow:hidden;}
+
+:root {
+  --primary: #6200EE;
+  --primary-variant: #3700B3;
+  --secondary: #03DAC6;
+  --secondary-variant: #018786;
+  --background: #121212;
+  --surface: #1a1a2e;
+  --error: #CF6679;
+  --on-primary: #000000;
+  --on-secondary: #000000;
+  --on-background: #FFFFFF;
+  --on-surface: #FFFFFF;
+  --on-error: #000000;
+  --card-bg: rgba(187,134,252,0.08);
+  --card-border: rgba(187,134,252,0.20);
+  --sidebar-bg: #1F1B24;
+  --sidebar-text: #FFFFFF;
+  --sidebar-icon-active: #03DAC6;
+  --text-primary: #FFFFFF;
+  --text-secondary: #BB86FC;
+  --text-muted: #03DAC6;
+  --input-bg: rgba(255,255,255,0.07);
+  --input-text: #FFFFFF;
+  --profit: #03DAC6;
+  --loss: #CF6679;
+  --warning: #FFDE03;
+  --btn-bg: #BB86FC;
+  --btn-text: #000000;
+  --tooltip-bg: #BB86FC;
+  --tooltip-text: #000000;
+  --chart-text: rgba(255,255,255,0.7);
+  --chart-grid: rgba(255,255,255,0.07);
+  --neon-pink: #FF006E;
+  --neon-purple: #8338EC;
+  --neon-cyan: #00F5FF;
+}
+
+body{background:var(--background);color:var(--text-primary);font-family:'Rajdhani',sans-serif;display:flex;transition:background .3s,color .3s;}
+
+/* SIDEBAR */
+#sidebar{position:fixed;left:0;top:0;bottom:0;width:60px;background:var(--sidebar-bg);border-right:1px solid rgba(255,255,255,0.1);display:flex;flex-direction:column;align-items:center;padding:12px 0;z-index:100;gap:4px;}
+.sidebar-logo{width:36px;height:36px;border-radius:8px;background:linear-gradient(135deg,var(--primary),var(--secondary));display:flex;align-items:center;justify-content:center;font-size:18px;margin-bottom:16px;flex-shrink:0;}
+.nav-item{width:44px;height:44px;border:none;border-radius:10px;background:transparent;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:background .2s;position:relative;}
+.nav-item svg{width:20px;height:20px;stroke:rgba(255,255,255,0.55);fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round;transition:stroke .2s;}
+.nav-item:hover{background:rgba(255,255,255,0.12);}
+.nav-item:hover svg{stroke:#fff;}
+.nav-item.active{background:rgba(255,255,255,0.2);}
+.nav-item.active svg{stroke:#fff;}
+.nav-item::after{content:attr(data-label);position:absolute;left:54px;background:var(--tooltip-bg);border:1px solid var(--card-border);border-radius:6px;padding:4px 10px;font-size:12px;white-space:nowrap;opacity:0;pointer-events:none;transition:opacity .15s;z-index:200;color:var(--tooltip-text);font-family:'Rajdhani',sans-serif;font-weight:600;}
+.nav-item:hover::after{opacity:1;}
+.sidebar-bottom{margin-top:auto;display:flex;flex-direction:column;align-items:center;gap:8px;}
+.kill-sidebar-btn{width:44px;height:44px;border-radius:10px;border:1px solid var(--loss);background:rgba(207,102,121,0.12);cursor:pointer;display:flex;align-items:center;justify-content:center;transition:background .2s;}
+.kill-sidebar-btn:hover{background:rgba(207,102,121,0.35);}
+.kill-sidebar-btn svg{width:18px;height:18px;stroke:var(--loss);fill:none;stroke-width:2;}
+
+/* MAIN */
+#main{margin-left:60px;flex:1;height:100vh;overflow-y:auto;overflow-x:hidden;padding:16px;padding-bottom:28px;background:var(--background);}
+.tab{display:none;}.tab.active{display:block;height:auto;padding-bottom:24px;}
+
+/* SCROLLBAR */
+::-webkit-scrollbar{width:4px;height:4px;}
+::-webkit-scrollbar-track{background:transparent;}
+::-webkit-scrollbar-thumb{background:var(--card-border);border-radius:2px;}
+::-webkit-scrollbar-thumb:hover{background:var(--secondary);}
+
+/* TICKER */
+#ticker-wrap{width:100%;overflow:hidden;background:var(--card-bg);border:1px solid var(--card-border);border-radius:8px;padding:8px 0;margin-bottom:16px;}
+#ticker-inner{display:inline-flex;gap:60px;white-space:nowrap;animation:ticker-scroll 30s linear infinite;font-family:'Space Mono',monospace;font-size:13px;}
+.ticker-item{display:inline-flex;gap:8px;align-items:center;}
+.ticker-label{color:var(--text-secondary);}.ticker-val{color:var(--text-primary);}.ticker-up{color:var(--profit);}.ticker-down{color:var(--loss);}
+@keyframes ticker-scroll{0%{transform:translateX(0);}100%{transform:translateX(-50%);}}
+
+/* STAT CARDS */
+.cards-row{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:16px;}
+.stat-card{background:var(--card-bg);border:1px solid var(--card-border);border-radius:12px;padding:16px;position:relative;overflow:hidden;}
+.stat-card::before{content:'';position:absolute;top:0;left:0;right:0;height:2px;}
+.stat-card.accent-purple::before{background:var(--primary);}
+.stat-card.accent-pink::before{background:var(--neon-pink);}
+.stat-card.accent-cyan::before{background:var(--secondary);}
+.stat-card.accent-green::before{background:var(--profit);}
+.stat-label{font-size:11px;color:var(--text-secondary);text-transform:uppercase;letter-spacing:.08em;margin-bottom:6px;}
+.stat-value{font-family:'Space Mono',monospace;font-size:22px;font-weight:700;line-height:1.2;color:var(--text-primary);}
+.stat-sub{font-size:11px;color:var(--text-secondary);margin-top:4px;}
+
+/* CARD */
+.card{background:var(--card-bg);border:1px solid var(--card-border);border-radius:12px;padding:16px;margin-bottom:16px;}
+.card-title{font-size:13px;color:var(--text-secondary);text-transform:uppercase;letter-spacing:.08em;margin-bottom:12px;display:flex;align-items:center;gap:6px;}
+.card-title .dot{width:6px;height:6px;border-radius:50%;background:var(--primary);}
+
+/* GRIDS */
+.grid-2{display:grid;grid-template-columns:3fr 2fr;gap:12px;margin-bottom:16px;}
+.grid-3{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:16px;}
+.chart-wrap{position:relative;height:220px;}
+
+/* BOT CARDS */
+.bot-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:12px;margin-bottom:16px;}
+.bot-card{background:var(--card-bg);border:1px solid var(--card-border);border-radius:12px;padding:16px;transition:all .3s;}
+.bot-card:hover{border-color:var(--secondary);}
+.bot-card.neon{border:2px solid var(--neon-pink);box-shadow:0 0 15px rgba(255,0,110,0.3);}
+.bot-card.neon:hover{box-shadow:0 0 25px rgba(255,0,110,0.5);}
+.bot-card-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;}
+.bot-name{font-size:15px;font-weight:700;color:var(--text-primary);}
+.status-badge{font-size:10px;padding:3px 8px;border-radius:4px;font-family:'Space Mono',monospace;}
+.status-badge.running{background:rgba(3,218,198,0.15);color:var(--profit);border:1px solid rgba(3,218,198,0.35);}
+.status-badge.paused{background:rgba(255,222,3,0.15);color:var(--warning);border:1px solid rgba(255,222,3,0.35);}
+.status-badge.error{background:rgba(207,102,121,0.15);color:var(--loss);border:1px solid rgba(207,102,121,0.35);}
+.bot-pnl{font-family:'Space Mono',monospace;font-size:24px;font-weight:700;margin-bottom:4px;}
+.bot-detail{font-size:11px;color:var(--text-secondary);margin-bottom:12px;}
+.bot-controls{display:flex;gap:6px;}
+.ctrl-btn{flex:1;background:var(--card-bg);border:1px solid var(--card-border);border-radius:6px;padding:6px;color:var(--text-primary);cursor:pointer;font-size:12px;transition:all .2s;}
+.ctrl-btn.start:hover{background:rgba(3,218,198,0.15);border-color:var(--profit);color:var(--profit);}
+.ctrl-btn.stop:hover{background:rgba(207,102,121,0.15);border-color:var(--loss);color:var(--loss);}
+
+/* SNIPER ANIMATION */
+.sniper-pulse{animation:pulse 1.5s infinite;}
+@keyframes pulse{0%{transform:scale(1);opacity:1;}50%{transform:scale(1.1);opacity:0.7;}100%{transform:scale(1);opacity:1;}}
+.sniper-text{color:var(--neon-pink);font-weight:bold;text-shadow:0 0 10px var(--neon-pink);}
+
+/* WITHDRAWAL SECTION */
+.withdraw-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:12px;margin-bottom:16px;}
+.withdraw-card{background:var(--card-bg);border:1px solid var(--card-border);border-radius:12px;padding:16px;text-align:center;}
+.withdraw-card h4{margin-bottom:12px;color:var(--text-secondary);}
+.withdraw-btn{background:var(--btn-bg);color:var(--btn-text);border:none;border-radius:8px;padding:12px 24px;cursor:pointer;font-weight:600;transition:all .2s;margin:4px;}
+.withdraw-btn:hover{filter:brightness(1.15);transform:translateY(-2px);}
+.withdraw-btn.secondary{background:var(--card-bg);border:1px solid var(--card-border);color:var(--text-primary);}
+.withdraw-btn.danger{background:var(--loss);color:white;}
+
+/* SYSTEM STATS */
+.sys-row1{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:12px;}
+.donut-card{background:var(--card-bg);border:1px solid var(--card-border);border-radius:12px;padding:14px 10px;display:flex;flex-direction:column;align-items:center;gap:12px;}
+.donut-wrap{position:relative;width:100px;height:100px;}
+.donut-center{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;}
+.donut-pct{font-family:'Space Mono',monospace;font-size:18px;font-weight:700;color:var(--text-primary);}
+.donut-name{font-size:11px;color:var(--text-secondary);text-transform:uppercase;}
+
+/* API CARDS */
+.api-grid-5{display:grid;grid-template-columns:repeat(5,1fr);gap:10px;margin-bottom:12px;}
+.api-card{background:var(--card-bg);border:1px solid var(--card-border);border-radius:10px;padding:12px;}
+.api-card-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;}
+.api-name{font-size:13px;font-weight:600;color:var(--text-primary);}
+.api-badge{font-size:10px;padding:2px 6px;border-radius:4px;font-family:'Space Mono',monospace;}
+.api-badge.ok{background:rgba(3,218,198,0.15);color:var(--profit);border:1px solid rgba(3,218,198,0.35);}
+.api-badge.err{background:rgba(207,102,121,0.15);color:var(--loss);border:1px solid rgba(207,102,121,0.35);}
+.api-calls{font-family:'Space Mono',monospace;font-size:18px;font-weight:700;margin-bottom:6px;color:var(--text-primary);}
+
+/* ACTION BUTTONS */
+.action-row{display:flex;gap:10px;flex-wrap:wrap;margin-top:16px;}
+.action-btn{flex:1;min-width:120px;background:var(--card-bg);border:1px solid var(--card-border);border-radius:10px;padding:12px;color:var(--text-primary);cursor:pointer;font-family:'Rajdhani',sans-serif;font-size:14px;font-weight:600;transition:all .2s;}
+.action-btn:hover{background:var(--card-bg);border-color:var(--primary);}
+.action-btn.danger{border-color:var(--loss);color:var(--loss);background:rgba(207,102,121,0.1);}
+.action-btn.danger:hover{background:rgba(207,102,121,0.3);}
+
+/* TABLE */
+.data-table{width:100%;border-collapse:collapse;font-size:12px;}
+.data-table th{font-size:11px;color:var(--text-secondary);text-align:left;padding:8px;border-bottom:1px solid var(--card-border);}
+.data-table td{padding:8px;border-bottom:1px solid var(--card-border);color:var(--text-primary);}
+.data-table tr:last-child td{border-bottom:none;}
+
+/* UTILS */
+.profit{color:var(--profit);}.loss{color:var(--loss);}.muted{color:var(--text-muted);}
+.text-center{text-align:center;}
+.mb-0{margin-bottom:0;}
+
+/* PROGRESS BAR */
+#progress-bar{position:fixed;bottom:0;left:60px;right:0;height:3px;background:var(--card-bg);z-index:50;}
+#progress-fill{height:100%;background:linear-gradient(90deg,var(--primary),var(--secondary));transition:width 1s linear;}
+
+/* MOBILE */
+@media(max-width:768px){
+  #sidebar{position:fixed;bottom:0;left:0;right:0;top:auto;width:100%;height:56px;flex-direction:row;justify-content:space-around;padding:0 8px;}
+  .sidebar-logo{display:none;}
+  .sidebar-bottom{margin-top:0;flex-direction:row;}
+  .nav-item::after{display:none;}
+  #main{margin-left:0;padding-bottom:70px;}
+  #progress-bar{left:0;bottom:56px;}
+  .cards-row{grid-template-columns:repeat(2,1fr);}
+  .grid-2,.grid-3,.sys-row1,.withdraw-grid{grid-template-columns:1fr;}
+  .api-grid-5{grid-template-columns:repeat(2,1fr);}
+  .bot-grid{grid-template-columns:1fr;}
+}
+</style>
+</head>
+<body>
+
+<!-- SIDEBAR -->
+<nav id="sidebar">
+  <div class="sidebar-logo">
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.5"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+  </div>
+  <button class="nav-item active" data-tab="overview" data-label="종합현황" onclick="switchTab('overview')">
+    <svg viewBox="0 0 24 24"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
+  </button>
+  <button class="nav-item" data-tab="stable" data-label="안정봇" onclick="switchTab('stable')">
+    <svg viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="2"/><rect x="9" y="9" width="6" height="6"/></svg>
+  </button>
+  <button class="nav-item" data-tab="dopamine" data-label="도파민봇" onclick="switchTab('dopamine')">
+    <svg viewBox="0 0 24 24"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+  </button>
+  <button class="nav-item" data-tab="withdraw" data-label="출금" onclick="switchTab('withdraw')">
+    <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 6v12M8 10l4-4 4 4"/></svg>
+  </button>
+  <button class="nav-item" data-tab="system" data-label="시스템" onclick="switchTab('system')">
+    <svg viewBox="0 0 24 24"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
+  </button>
+  <button class="nav-item" data-tab="ai" data-label="AI 분석" onclick="switchTab('ai')">
+    <svg viewBox="0 0 24 24"><path d="M12 2a10 10 0 1 0 10 10A10 10 0 0 0 12 2zm0 18a8 8 0 1 1 8-8 8 8 0 0 1-8 8z"/><path d="M12 6v6l4 2"/></svg>
+  </button>
+  <div class="sidebar-bottom">
+    <button class="kill-sidebar-btn" title="긴급킬스위치" onclick="killAllBots()">
+      <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>
+    </button>
+  </div>
+</nav>
+
+<!-- MAIN -->
+<div id="main">
+
+  <!-- TAB 1: 종합현황 -->
+  <div id="tab-overview" class="tab active">
+    <div id="ticker-wrap">
+      <div id="ticker-inner">
+        <span class="ticker-item"><span class="ticker-label">BTC</span><span id="tk-btc" class="ticker-val">-- USD</span></span>
+        <span class="ticker-item"><span class="ticker-label">ETH</span><span id="tk-eth" class="ticker-val">-- USD</span></span>
+        <span class="ticker-item"><span class="ticker-label">SOL</span><span id="tk-sol" class="ticker-val">-- USD</span></span>
+        <span class="ticker-item"><span class="ticker-label">총자본</span><span id="tk-capital" class="ticker-val">--</span></span>
+        <span class="ticker-item"><span class="ticker-label">오늘수익</span><span id="tk-today" class="ticker-val">--</span></span>
+        <span class="ticker-item"><span class="ticker-label">BTC</span><span id="tk-btc2" class="ticker-val">-- USD</span></span>
+        <span class="ticker-item"><span class="ticker-label">ETH</span><span id="tk-eth2" class="ticker-val">-- USD</span></span>
+        <span class="ticker-item"><span class="ticker-label">SOL</span><span id="tk-sol2" class="ticker-val">-- USD</span></span>
+      </div>
+    </div>
+
+    <div class="cards-row">
+      <div class="stat-card accent-purple">
+        <div class="stat-label">총 포트폴리오 가치</div>
+        <div class="stat-value" id="ov-total">$--</div>
+        <div class="stat-sub">11개 봇 운영중</div>
+      </div>
+      <div class="stat-card accent-green">
+        <div class="stat-label">오늘 수익</div>
+        <div class="stat-value" id="ov-today">$--</div>
+        <div class="stat-sub" id="ov-today-sub">누적 $--</div>
+      </div>
+      <div class="stat-card accent-cyan">
+        <div class="stat-label">출금 가능</div>
+        <div class="stat-value" id="ov-withdraw">$--</div>
+        <div class="stat-sub">대기 잔액</div>
+      </div>
+      <div class="stat-card accent-pink">
+        <div class="stat-label">가동 봇</div>
+        <div class="stat-value" id="ov-bots">--/11</div>
+        <div class="stat-sub" id="ov-bot-status">정상</div>
+      </div>
+    </div>
+
+    <div class="grid-2">
+      <div class="card">
+        <div class="card-title"><span class="dot"></span> 수익 추이 (14일)</div>
+        <div class="chart-wrap"><canvas id="profit-chart"></canvas></div>
+      </div>
+      <div class="card">
+        <div class="card-title"><span class="dot" style="background:var(--neon-pink)"></span> 거래소별 잔액</div>
+        <table class="data-table" id="exchange-balances">
+          <tr><th>거래소</th><th>자산</th><th>잔액</th></tr>
+          <tr><td>Binance</td><td>USDT</td><td id="bal-binance">--</td></tr>
+          <tr><td>Bybit</td><td>USDT</td><td id="bal-bybit">--</td></tr>
+          <tr><td>Hyperliquid</td><td>USDC</td><td id="bal-hyper">--</td></tr>
+          <tr><td>MetaMask</td><td>USDC</td><td id="bal-metamask">--</td></tr>
+          <tr><td>Phantom B</td><td>SOL</td><td id="bal-phantom-b">--</td></tr>
+          <tr><td>Phantom C</td><td>SOL</td><td id="bal-phantom-c">--</td></tr>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- TAB 2: 안정봇 -->
+  <div id="tab-stable" class="tab">
+    <div class="card">
+      <div class="card-title"><span class="dot"></span> 안정봇 8개 (다크 테마)</div>
+    </div>
+    <div class="bot-grid" id="stable-bots">
+      <!-- 봇 카드들이 JS로 동적 생성됨 -->
+    </div>
+  </div>
+
+  <!-- TAB 3: 도파민봇 -->
+  <div id="tab-dopamine" class="tab">
+    <div class="card" style="border:2px solid var(--neon-pink); box-shadow:0 0 20px rgba(255,0,110,0.2);">
+      <div class="card-title"><span class="dot" style="background:var(--neon-pink)"></span> 도파민봇 3개 (네온 테마)</div>
+    </div>
+    <div class="bot-grid" id="dopamine-bots">
+      <!-- 도파민봇 카드들이 JS로 동적 생성됨 -->
+    </div>
+  </div>
+
+  <!-- TAB 4: 출금/현금화 -->
+  <div id="tab-withdraw" class="tab">
+    <div class="card">
+      <div class="card-title"><span class="dot" style="background:var(--profit)"></span> 출금 가능 금액</div>
+      <div class="text-center">
+        <div style="font-size:48px;font-family:'Space Mono',monospace;color:var(--profit);" id="wd-available">$0.00</div>
+        <div style="color:var(--text-muted);margin-top:8px;">출금 대기 잔액 ($50 이상 시 알림)</div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-title"><span class="dot" style="background:var(--secondary)"></span> 거래소별 출금</div>
+      <div class="withdraw-grid">
+        <div class="withdraw-card">
+          <h4>Binance USDT</h4>
+          <button class="withdraw-btn" onclick="withdraw('binance', 'USDT')">출금하기</button>
+        </div>
+        <div class="withdraw-card">
+          <h4>Bybit USDT</h4>
+          <button class="withdraw-btn" onclick="withdraw('bybit', 'USDT')">출금하기</button>
+        </div>
+        <div class="withdraw-card">
+          <h4>Hyperliquid USDC</h4>
+          <button class="withdraw-btn" onclick="withdraw('hyperliquid', 'USDC')">출금하기</button>
+        </div>
+        <div class="withdraw-card">
+          <h4>MetaMask USDC → Binance</h4>
+          <button class="withdraw-btn" onclick="withdraw('metamask', 'USDC')">전송하기</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-title"><span class="dot" style="background:var(--warning)"></span> 현금화 플로우</div>
+      <div style="display:flex;align-items:center;justify-content:center;gap:20px;flex-wrap:wrap;padding:20px;">
+        <div style="text-align:center;">
+          <div style="font-size:24px;">💰</div>
+          <div>크립토</div>
+        </div>
+        <div style="color:var(--text-muted);">→</div>
+        <div style="text-align:center;">
+          <div style="font-size:24px;">🏦</div>
+          <div>Binance</div>
+        </div>
+        <div style="color:var(--text-muted);">→</div>
+        <div style="text-align:center;">
+          <div style="font-size:24px;">₩</div>
+          <div>원화</div>
+        </div>
+        <div style="color:var(--text-muted);">→</div>
+        <div style="text-align:center;">
+          <div style="font-size:24px;">📱</div>
+          <div>토스/카카오</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-title"><span class="dot"></span> 출금 히스토리</div>
+      <table class="data-table" id="withdraw-history">
+        <tr><th>시간</th><th>거래소</th><th>자산</th><th>금액</th><th>상태</th></tr>
+      </table>
+    </div>
+  </div>
+
+  <!-- TAB 5: 시스템 -->
+  <div id="tab-system" class="tab">
+    <div class="sys-row1">
+      <div class="donut-card">
+        <div class="donut-wrap">
+          <canvas id="cpu-donut"></canvas>
+          <div class="donut-center"><div class="donut-pct" id="cpu-pct">--</div><div class="donut-name">CPU</div></div>
+        </div>
+      </div>
+      <div class="donut-card">
+        <div class="donut-wrap">
+          <canvas id="ram-donut"></canvas>
+          <div class="donut-center"><div class="donut-pct" id="ram-pct">--</div><div class="donut-name">RAM</div></div>
+        </div>
+      </div>
+      <div class="donut-card">
+        <div class="donut-wrap">
+          <canvas id="disk-donut"></canvas>
+          <div class="donut-center"><div class="donut-pct" id="disk-pct">--</div><div class="donut-name">DISK</div></div>
+        </div>
+      </div>
+      <div class="donut-card">
+        <div class="donut-wrap">
+          <canvas id="docker-donut"></canvas>
+          <div class="donut-center"><div class="donut-pct" id="docker-pct">--</div><div class="donut-name">Docker</div></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-title"><span class="dot" style="background:var(--secondary)"></span> API 사용량</div>
+      <div class="api-grid-5" id="api-usage">
+        <!-- API 카드들이 JS로 동적 생성됨 -->
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-title"><span class="dot" style="background:var(--warning)"></span> 시스템 제어</div>
+      <div class="action-row">
+        <button class="action-btn" onclick="restartSystem()">🔄 시스템 재시작</button>
+        <button class="action-btn" onclick="toggleTelegram()" id="btn-telegram">🔔 Telegram ON</button>
+        <button class="action-btn danger" onclick="killAllBots()">🚨 전체 킬스위치</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- TAB 6: AI 분석 -->
+  <div id="tab-ai" class="tab">
+    <div class="grid-2">
+      <div class="card">
+        <div class="card-title"><span class="dot" style="background:var(--neon-purple)"></span> TradingAgents 분석</div>
+        <div id="ai-analysis-content">
+          <p class="muted">AI 분석 데이터 로딩 중...</p>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-title"><span class="dot" style="background:var(--neon-cyan)"></span> 시장 감성 지표</div>
+        <div class="chart-wrap"><canvas id="sentiment-chart"></canvas></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-title"><span class="dot"></span> 봇 성과 AI 리포트</div>
+      <table class="data-table" id="ai-report">
+        <tr><th>봇</th><th>AI 평가</th><th>개선 제안</th><th>신뢰도</th></tr>
+      </table>
+    </div>
+  </div>
+
+</div><!-- /MAIN -->
+
+<!-- PROGRESS BAR -->
+<div id="progress-bar"><div id="progress-fill" style="width:100%"></div></div>
+
+<script>
+// BOT CONFIGURATION
+const BOTS = {
+  // 안정봇 8개
+  'grid_binance_001': {name: '봇-01 Binance Grid', exchange: 'Binance', symbol: 'BTC/USDT', capital: 11, type: 'stable', status: 'running'},
+  'dca_binance_001': {name: '봇-02 Binance DCA', exchange: 'Binance', symbol: 'BTC/USDT', capital: 14, type: 'stable', status: 'running'},
+  'triarb_binance_001': {name: '봇-03 삼각아비트라지', exchange: 'Binance', symbol: 'BTC/ETH/BNB', capital: 10.35, type: 'stable', status: 'running'},
+  'funding_binance_bybit_001': {name: '봇-04 Funding Rate', exchange: 'Binance+Bybit', symbol: 'Multi', capital: 16, type: 'stable', status: 'running'},
+  'grid_bybit_001': {name: '봇-05 Bybit Grid', exchange: 'Bybit', symbol: 'SOL/USDT', capital: 8.44, type: 'stable', status: 'running'},
+  'scalper_bybit_001': {name: '봇-06 Bybit 스캘핑', exchange: 'Bybit', symbol: 'SOL/USDT', capital: 20, type: 'stable', status: 'running'},
+  'ibkr_forecast_001': {name: '봇-08 IBKR Forecast', exchange: 'IBKR', symbol: 'AAPL/MSFT', capital: 10, type: 'stable', status: 'mock'},
+  'polymarket_ai_001': {name: '봇-09 Polymarket AI', exchange: 'Polymarket', symbol: 'Multi', capital: 19.85, type: 'stable', status: 'running'},
+  // 도파민봇 3개
+  'hyperliquid_mm_001': {name: '봇-07 Hyperliquid', exchange: 'Hyperliquid', symbol: 'SOL-PERP', capital: 10.12, type: 'dopamine', status: 'running', leverage: 5},
+  'pump_sniper_001': {name: '봇-11 Pump.fun 스나이퍼', exchange: 'Solana', symbol: 'New Tokens', capital: 0.1, type: 'dopamine', status: 'running', unit: 'SOL'},
+  'gmgn_copy_001': {name: '봇-12 GMGN 카피', exchange: 'Solana', symbol: 'Smart Money', capital: 0.067, type: 'dopamine', status: 'running', unit: 'SOL'}
+};
+
+// WebSocket 연결
+let ws = null;
+let currentTab = 'overview';
+let charts = {};
+
+// 초기화
+document.addEventListener('DOMContentLoaded', function() {
+  initWebSocket();
+  renderBots();
+  updateOverview();
+  startAutoRefresh();
+});
+
+// WebSocket 초기화
+function initWebSocket() {
+  const wsUrl = 'ws://' + window.location.host + '/ws';
+  try {
+    ws = new WebSocket(wsUrl);
+    ws.onopen = function() {
+      console.log('WebSocket connected');
+    };
+    ws.onmessage = function(event) {
+      const data = JSON.parse(event.data);
+      handleWebSocketMessage(data);
+    };
+    ws.onclose = function() {
+      console.log('WebSocket disconnected, reconnecting...');
+      setTimeout(initWebSocket, 3000);
+    };
+    ws.onerror = function(error) {
+      console.error('WebSocket error:', error);
+    };
+  } catch(e) {
+    console.error('Failed to connect WebSocket:', e);
+  }
+}
+
+// WebSocket 메시지 처리
+function handleWebSocketMessage(data) {
+  if (data.type === 'bot_status') {
+    updateBotStatus(data.bot_id, data.status);
+  } else if (data.type === 'profit_update') {
+    updateProfit(data);
+  } else if (data.type === 'system_metrics') {
+    updateSystemMetrics(data);
+  }
+}
+
+// 탭 전환
+function switchTab(tab) {
+  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+  document.querySelectorAll('.nav-item').forEach(b => b.classList.remove('active'));
+  document.getElementById('tab-' + tab).classList.add('active');
+  document.querySelector(`.nav-item[data-tab="${tab}"]`).classList.add('active');
+  currentTab = tab;
+
+  if (tab === 'stable' || tab === 'dopamine') {
+    renderBots();
+  }
+}
+
+// 봇 카드 렌더링
+function renderBots() {
+  const stableContainer = document.getElementById('stable-bots');
+  const dopamineContainer = document.getElementById('dopamine-bots');
+
+  let stableHtml = '';
+  let dopamineHtml = '';
+
+  for (const [botId, bot] of Object.entries(BOTS)) {
+    const statusClass = bot.status === 'running' ? 'running' : (bot.status === 'mock' ? 'paused' : 'error');
+    const pnl = (Math.random() * 2 - 0.5).toFixed(2); // Mock PnL
+    const capitalStr = bot.unit ? `${bot.capital} ${bot.unit}` : `$${bot.capital}`;
+
+    const cardHtml = `
+      <div class="bot-card ${bot.type === 'dopamine' ? 'neon' : ''}" id="card-${botId}">
+        <div class="bot-card-header">
+          <span class="bot-name">${bot.name}</span>
+          <span class="status-badge ${statusClass}">${bot.status.toUpperCase()}</span>
+        </div>
+        <div class="bot-pnl ${pnl >= 0 ? 'profit' : 'loss'}">${pnl >= 0 ? '+' : ''}${pnl}%</div>
+        <div class="bot-detail">
+          ${bot.exchange} | ${bot.symbol}<br>
+          자본: ${capitalStr}
+          ${bot.leverage ? ` | 레버리지: ${bot.leverage}x` : ''}
+        </div>
+        <div class="bot-controls">
+          <button class="ctrl-btn start" onclick="botControl('${botId}', 'start')">▶ 시작</button>
+          <button class="ctrl-btn stop" onclick="botControl('${botId}', 'stop')">⏸ 중지</button>
+        </div>
+        ${botId === 'pump_sniper_001' ? '<div class="sniper-text sniper-pulse">🚀 SNIPING...</div>' : ''}
+      </div>
+    `;
+
+    if (bot.type === 'stable') {
+      stableHtml += cardHtml;
+    } else {
+      dopamineHtml += cardHtml;
+    }
+  }
+
+  if (stableContainer) stableContainer.innerHTML = stableHtml;
+  if (dopamineContainer) dopamineContainer.innerHTML = dopamineHtml;
+}
+
+// 봇 제어
+function botControl(botId, action) {
+  fetch(`/api/bot/${botId}/${action}`, {method: 'POST'})
+    .then(r => r.json())
+    .then(data => {
+      console.log(`Bot ${botId} ${action}:`, data);
+      setTimeout(renderBots, 500);
+    })
+    .catch(e => console.error(e));
+}
+
+// 종합현황 업데이트
+function updateOverview() {
+  // Mock 데이터
+  const totalCapital = Object.values(BOTS).reduce((sum, b) => sum + (b.unit ? b.capital * 150 : b.capital), 0);
+  const todayProfit = (Math.random() * 10 - 2).toFixed(2);
+  const totalProfit = (Math.random() * 50 + 10).toFixed(2);
+  const withdrawable = Math.max(0, (totalProfit * 0.5 - 50)).toFixed(2);
+
+  document.getElementById('ov-total').textContent = `$${totalCapital.toFixed(2)}`;
+  document.getElementById('ov-today').textContent = `${todayProfit >= 0 ? '+' : ''}$${todayProfit}`;
+  document.getElementById('ov-today').className = 'stat-value ' + (todayProfit >= 0 ? 'profit' : 'loss');
+  document.getElementById('ov-today-sub').textContent = `누적 $${totalProfit}`;
+  document.getElementById('ov-withdraw').textContent = `$${withdrawable}`;
+  document.getElementById('wd-available').textContent = `$${withdrawable}`;
+
+  const runningBots = Object.values(BOTS).filter(b => b.status === 'running').length;
+  document.getElementById('ov-bots').textContent = `${runningBots}/11`;
+}
+
+// 출금
+function withdraw(exchange, asset) {
+  if (!confirm(`${exchange}에서 ${asset} 출금을 진행하시겠습니까?`)) return;
+
+  fetch('/api/withdraw', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({exchange, asset})
+  })
+  .then(r => r.json())
+  .then(data => {
+    alert(data.message || '출금 신청이 완료되었습니다.');
+    addWithdrawHistory(exchange, asset, data.amount || 0);
+  })
+  .catch(e => alert('출금 요청 실패: ' + e));
+}
+
+// 출금 히스토리 추가
+function addWithdrawHistory(exchange, asset, amount) {
+  const table = document.getElementById('withdraw-history');
+  const row = table.insertRow(1);
+  row.innerHTML = `
+    <td>${new Date().toLocaleString()}</td>
+    <td>${exchange}</td>
+    <td>${asset}</td>
+    <td>$${amount}</td>
+    <td style="color:var(--profit)">처리중</td>
+  `;
+}
+
+// 킬스위치
+function killAllBots() {
+  if (!confirm('🚨 정말 모든 봇을 긴급 중지하시겠습니까?\n\n이 작업은 되돌릴 수 없습니다.')) return;
+
+  fetch('/api/killswitch', {method: 'POST'})
+    .then(r => r.json())
+    .then(data => {
+      alert('🚨 킬스위치가 활성화되었습니다.\n모든 봇이 중지됩니다.');
+    })
+    .catch(e => alert('킬스위치 실행 실패: ' + e));
+}
+
+// Telegram 토글
+let telegramEnabled = true;
+function toggleTelegram() {
+  telegramEnabled = !telegramEnabled;
+  document.getElementById('btn-telegram').textContent = telegramEnabled ? '🔔 Telegram ON' : '🔕 Telegram OFF';
+  fetch('/api/toggle-telegram', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({enabled: telegramEnabled})
+  });
+}
+
+// 시스템 재시작
+function restartSystem() {
+  if (!confirm('시스템을 재시작하시겠습니까?')) return;
+  fetch('/api/restart', {method: 'POST'})
+    .then(() => alert('시스템 재시작 중...'))
+    .catch(e => alert('재시작 요청 실패: ' + e));
+}
+
+// 자동 새로고침
+function startAutoRefresh() {
+  setInterval(() => {
+    updateOverview();
+    if (currentTab === 'stable' || currentTab === 'dopamine') {
+      renderBots();
+    }
+  }, 5000);
+}
+
+// 차트 초기화 (Chart.js)
+function initCharts() {
+  // 수익 차트
+  const profitCtx = document.getElementById('profit-chart');
+  if (profitCtx) {
+    charts.profit = new Chart(profitCtx, {
+      type: 'line',
+      data: {
+        labels: Array.from({length: 14}, (_, i) => `${i+1}일`),
+        datasets: [{
+          label: '일별 수익',
+          data: Array.from({length: 14}, () => Math.random() * 5 - 1),
+          borderColor: '#03DAC6',
+          backgroundColor: 'rgba(3,218,198,0.1)',
+          fill: true
+        }]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {legend: {display: false}},
+        scales: {
+          y: {grid: {color: 'rgba(255,255,255,0.07)'}, ticks: {color: 'rgba(255,255,255,0.7)'}},
+          x: {grid: {display: false}, ticks: {color: 'rgba(255,255,255,0.7)'}}
+        }
+      }
+    });
+  }
+}
+
+// 페이지 로드 완료 후 차트 초기화
+window.addEventListener('load', initCharts);
+</script>
+
+</body>
+</html>

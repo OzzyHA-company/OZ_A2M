@@ -20,7 +20,7 @@ from typing import Dict, List, Optional, Any, Callable
 from decimal import Decimal
 from enum import Enum
 
-import ccxt
+import ccxt.async_support as ccxt
 
 import sys
 from pathlib import Path
@@ -521,7 +521,7 @@ async def main():
         capital=11.0,
         grid_count=20,
         grid_spacing_pct=0.005,
-        sandbox=True
+        sandbox=False
     )
 
     try:

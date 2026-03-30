@@ -6,7 +6,7 @@ STEP 11: OZ_A2M 완결판
 - 거래소: Binance + Bybit
 - 전략: 양수 펀딩 → 현물매수 + 선물공매도
 - 8시간마다 펀딩 수취
-- 자본: $20
+- 자본: $16
 - sandbox: False (실거래)
 """
 
@@ -78,7 +78,7 @@ class FundingRateBot:
     def __init__(
         self,
         bot_id: str = "funding_binance_bybit_001",
-        capital: float = 20.0,
+        capital: float = 16.0,
         min_funding_rate: float = 0.0001,  # 0.01% 이상
         funding_interval_hours: int = 8,
         sandbox: bool = False,
@@ -523,9 +523,9 @@ async def main():
     """단독 실행용"""
     bot = FundingRateBot(
         bot_id="funding_binance_bybit_001",
-        capital=20.0,
+        capital=16.0,
         min_funding_rate=0.0001,
-        sandbox=True,
+        sandbox=False,
     )
 
     try:

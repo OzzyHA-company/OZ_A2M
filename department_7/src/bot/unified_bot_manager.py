@@ -404,9 +404,10 @@ def get_bot_manager() -> UnifiedBotManager:
 
 
 def reset_bot_manager():
-    """BotManager 초기화"""
+    """BotManager 초기화 - 싱글톤 인스턴스 완전히 제거"""
     global _manager
     _manager = None
+    UnifiedBotManager._instance = None
 
 
 # Bybit 스캘핑봇 생성 및 등록 헬퍼

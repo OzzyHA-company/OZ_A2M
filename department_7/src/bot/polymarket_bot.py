@@ -8,7 +8,7 @@ STEP 13: OZ_A2M 완결판
 - Gemini/Groq AI 확률 분석
 - 괴리 5% 이상 시 자동 베팅
 - Kelly Criterion 포지션 사이징
-- 자본: $20 USDC
+- 자본: $19.85 USDC
 - Mock 모드 지원
 """
 
@@ -92,7 +92,7 @@ class PolymarketAIBot:
     def __init__(
         self,
         bot_id: str = "polymarket_ai_001",
-        capital: float = 20.0,
+        capital: float = 19.85,
         min_edge: float = 0.05,  # 5% 괴리
         kelly_fraction: float = 0.25,  # 1/4 Kelly
         min_bet: float = 1.0,
@@ -469,8 +469,8 @@ async def main():
     """단독 실행용"""
     bot = PolymarketAIBot(
         bot_id="polymarket_ai_001",
-        capital=20.0,
-        mock_mode=True
+        capital=19.85,
+        mock_mode=False
     )
 
     try:

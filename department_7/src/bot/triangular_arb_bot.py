@@ -7,7 +7,7 @@ STEP 11: OZ_A2M 완결판
 - 경로: BTC → ETH → BNB → BTC
 - 최소 수익률: 0.1%
 - 수수료 자동 계산
-- 자본: $20
+- 자본: $10.35
 - sandbox: False (실거래)
 """
 
@@ -79,7 +79,7 @@ class TriangularArbBot:
         self,
         bot_id: str = "triarb_binance_001",
         exchange_id: str = "binance",
-        capital: float = 20.0,
+        capital: float = 10.35,
         min_profit_pct: float = 0.001,  # 0.1%
         base_currency: str = "BTC",
         arb_path: List[str] = None,  # ["ETH", "BNB"]
@@ -451,9 +451,9 @@ async def main():
     """단독 실행용"""
     bot = TriangularArbBot(
         bot_id="triarb_binance_001",
-        capital=20.0,
+        capital=10.35,
         min_profit_pct=0.001,
-        sandbox=True
+        sandbox=False
     )
 
     try:

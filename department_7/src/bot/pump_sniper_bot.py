@@ -546,7 +546,7 @@ async def main():
     bot = PumpSniperBot(
         bot_id="pump_sniper_001",
         capital_sol=0.1,
-        mock_mode=True
+        mock_mode=False
     )
 
     try:

@@ -5,7 +5,9 @@ STEP 12: OZ_A2M 완결판
 설정:
 - 거래소: Hyperliquid
 - 마켓메이커 전략 (기존 market_maker_bot.py 기반)
-- 자본: $20
+- 자본: $10.12
+- 레버리지: 5배
+- 도파민봇 (고위험/고수익)
 - Mock 모드 지원 (연결 실패 시)
 """
 
@@ -85,7 +87,7 @@ class HyperliquidMarketMakerBot:
         self,
         bot_id: str = "hyperliquid_mm_001",
         symbol: str = "SOL-PERP",
-        capital: float = 20.0,
+        capital: float = 10.12,
         base_spread_bps: float = 10.0,  # 0.1%
         inventory_target: float = 0.5,  # 목표 인벤토리 비율
         sandbox: bool = False,
@@ -130,6 +132,11 @@ class HyperliquidMarketMakerBot:
         self.total_trades: int = 0
         self.maker_volume: float = 0.0
         self.total_pnl: float = 0.0
+
+        # Mock 데이터 (테스트용)
+        if self.mock_mode:
+            self._mock_price = 150.0
+            self._mock_balance = {"USDC": self.capital, "SOL": 0.0}
 
         # 콜백
         self.on_trade: Optional[Callable[[HLTrade], None]] = None
@@ -338,8 +345,8 @@ async def main():
     bot = HyperliquidMarketMakerBot(
         bot_id="hyperliquid_mm_001",
         symbol="SOL-PERP",
-        capital=20.0,
-        mock_mode=True  # 테스트용
+        capital=10.12,
+        mock_mode=False  # 실거래 모드
     )
 
     try:

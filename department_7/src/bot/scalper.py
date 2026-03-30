@@ -18,7 +18,7 @@ from typing import Dict, List, Optional, Callable
 from enum import Enum
 from decimal import Decimal
 
-import ccxt
+import ccxt.async_support as ccxt
 
 import sys
 from pathlib import Path
