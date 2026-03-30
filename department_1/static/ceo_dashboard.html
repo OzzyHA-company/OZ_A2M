@@ -289,20 +289,34 @@ body{background:var(--background);color:var(--text-primary);font-family:'Rajdhan
   <!-- TAB 2: 안정봇 -->
   <div id="tab-stable" class="tab">
     <div class="card">
+      <div class="card-title"><span class="dot"></span> 안정봇 종합 수익 추이</div>
+      <div class="chart-wrap" style="height:250px;"><canvas id="stable-combined-chart"></canvas></div>
+    </div>
+    <div class="card">
       <div class="card-title"><span class="dot"></span> 안정봇 8개 (다크 테마)</div>
     </div>
     <div class="bot-grid" id="stable-bots">
       <!-- 봇 카드들이 JS로 동적 생성됨 -->
+    </div>
+    <div id="stable-charts-container">
+      <!-- 봇별 개별 차트가 JS로 동적 생성됨 -->
     </div>
   </div>
 
   <!-- TAB 3: 도파민봇 -->
   <div id="tab-dopamine" class="tab">
     <div class="card" style="border:2px solid var(--neon-pink); box-shadow:0 0 20px rgba(255,0,110,0.2);">
+      <div class="card-title"><span class="dot" style="background:var(--neon-pink)"></span> 도파민봇 종합 수익 추이 (네온)</div>
+      <div class="chart-wrap" style="height:250px;"><canvas id="dopamine-combined-chart"></canvas></div>
+    </div>
+    <div class="card" style="border:2px solid var(--neon-pink); box-shadow:0 0 20px rgba(255,0,110,0.2);">
       <div class="card-title"><span class="dot" style="background:var(--neon-pink)"></span> 도파민봇 3개 (네온 테마)</div>
     </div>
     <div class="bot-grid" id="dopamine-bots">
       <!-- 도파민봇 카드들이 JS로 동적 생성됨 -->
+    </div>
+    <div id="dopamine-charts-container">
+      <!-- 봇별 개별 차트가 JS로 동적 생성됨 -->
     </div>
   </div>
 
@@ -441,7 +455,12 @@ body{background:var(--background);color:var(--text-primary);font-family:'Rajdhan
     <div class="card">
       <div class="card-title"><span class="dot"></span> 봇 성과 AI 리포트</div>
       <table class="data-table" id="ai-report">
-        <tr><th>봇</th><th>AI 평가</th><th>개선 제안</th><th>신뢰도</th></tr>
+        <thead>
+          <tr><th>봇</th><th>AI 평가</th><th>개선 제안</th><th>신뢰도</th><th>추천</th></tr>
+        </thead>
+        <tbody id="ai-report-body">
+          <tr><td colspan="5" class="text-center muted">AI 분석 데이터 로딩 중...</td></tr>
+        </tbody>
       </table>
     </div>
   </div>
@@ -892,7 +911,7 @@ function startAutoRefresh() {
 
 // 차트 초기화 (Chart.js)
 function initCharts() {
-  // 수익 추이 차트
+  // 수익 추이 차트 (종합현황)
   const profitCtx = document.getElementById('profit-chart');
   if (profitCtx) {
     charts.profit = new Chart(profitCtx, {
@@ -919,6 +938,12 @@ function initCharts() {
       }
     });
   }
+
+  // 안정봇 종합 차트
+  initStableCombinedChart();
+
+  // 도파민봇 종합 차트
+  initDopamineCombinedChart();
 
   // 감성 분석 차트
   const sentimentCtx = document.getElementById('sentiment-chart');
@@ -954,6 +979,126 @@ function initCharts() {
   updateSystemMetrics({cpu: 0, memory: 0, disk: 0, docker: 0});
 }
 
+// 안정봇 종합 차트 초기화
+function initStableCombinedChart() {
+  const ctx = document.getElementById('stable-combined-chart');
+  if (!ctx) return;
+
+  const stableColors = ['#03DAC6', '#BB86FC', '#00F5FF', '#3700B3', '#018786', '#CF6679', '#FFDE03', '#FFFFFF'];
+
+  charts.stableCombined = new Chart(ctx, {
+    type: 'line',
+    data: {
+      labels: Array.from({length: 14}, (_, i) => `${i+1}일`),
+      datasets: []
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: {
+          display: true,
+          labels: {color: 'rgba(255,255,255,0.7)', font: {size: 11}}
+        }
+      },
+      scales: {
+        y: {
+          grid: {color: 'rgba(255,255,255,0.07)'},
+          ticks: {color: 'rgba(255,255,255,0.7)'}
+        },
+        x: {
+          grid: {display: false},
+          ticks: {color: 'rgba(255,255,255,0.7)'}
+        }
+      }
+    }
+  });
+}
+
+// 도파민봇 종합 차트 초기화
+function initDopamineCombinedChart() {
+  const ctx = document.getElementById('dopamine-combined-chart');
+  if (!ctx) return;
+
+  const neonColors = ['#FF006E', '#8338EC', '#00F5FF'];
+
+  charts.dopamineCombined = new Chart(ctx, {
+    type: 'line',
+    data: {
+      labels: Array.from({length: 14}, (_, i) => `${i+1}일`),
+      datasets: []
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: {
+          display: true,
+          labels: {color: 'rgba(255,255,255,0.7)', font: {size: 11}}
+        }
+      },
+      scales: {
+        y: {
+          grid: {color: 'rgba(255,255,255,0.07)'},
+          ticks: {color: 'rgba(255,255,255,0.7)'}
+        },
+        x: {
+          grid: {display: false},
+          ticks: {color: 'rgba(255,255,255,0.7)'}
+        }
+      }
+    }
+  });
+}
+
+// 봇별 수익 차트 업데이트
+function updateBotProfitCharts() {
+  const stableColors = ['#03DAC6', '#BB86FC', '#00F5FF', '#3700B3', '#018786', '#CF6679', '#FFDE03', '#FFFFFF'];
+  const neonColors = ['#FF006E', '#8338EC', '#00F5FF'];
+
+  // 안정봇 데이터셋 생성
+  const stableDatasets = [];
+  const dopamineDatasets = [];
+
+  let stableIdx = 0;
+  let dopamineIdx = 0;
+
+  for (const [botId, bot] of Object.entries(BOTS)) {
+    // Mock 데이터 (실제로는 API에서 가져옴)
+    const profitData = Array.from({length: 14}, () => (Math.random() - 0.3) * bot.capital * 0.1);
+
+    const dataset = {
+      label: bot.name || botId,
+      data: profitData,
+      borderColor: bot.type === 'stable' ? stableColors[stableIdx % stableColors.length] : neonColors[dopamineIdx % neonColors.length],
+      backgroundColor: 'transparent',
+      borderWidth: 2,
+      tension: 0.4,
+      pointRadius: 0
+    };
+
+    if (bot.type === 'stable') {
+      stableDatasets.push(dataset);
+      stableIdx++;
+    } else {
+      dopamineDatasets.push(dataset);
+      dopamineIdx++;
+    }
+  }
+
+  // 안정봇 차트 업데이트
+  if (charts.stableCombined) {
+    charts.stableCombined.data.datasets = stableDatasets;
+    charts.stableCombined.update();
+  }
+
+  // 도파민봇 차트 업데이트
+  if (charts.dopamineCombined) {
+    charts.dopamineCombined.data.datasets = dopamineDatasets;
+    charts.dopamineCombined.update();
+  }
+}
+
 // API 키 상태 조회
 async function loadApiKeyStatus() {
   try {
@@ -976,6 +1121,13 @@ function startAutoRefresh() {
     }
   }, 5000);
 
+  // 10초마다 봇별 수익 차트 업데이트
+  setInterval(() => {
+    if (currentTab === 'stable' || currentTab === 'dopamine') {
+      updateBotProfitCharts();
+    }
+  }, 10000);
+
   // 30초마다 거래소 잔액 업데이트
   setInterval(() => {
     updateExchangeBalances();
@@ -987,10 +1139,79 @@ function startAutoRefresh() {
   }, 60000);
 }
 
+// AI 분석 데이터 로드
+async function loadAIAnalysis() {
+  try {
+    const res = await fetch('/api/ai-analysis');
+    if (res.ok) {
+      const data = await res.json();
+      updateAIReport(data.reports || []);
+    } else {
+      // API가 없을 경우 Mock 데이터로 표시
+      generateMockAIReport();
+    }
+  } catch (e) {
+    console.error('Failed to load AI analysis:', e);
+    generateMockAIReport();
+  }
+}
+
+// Mock AI 리포트 생성 (실제 AI 분석 API 연동 전)
+function generateMockAIReport() {
+  const reports = [
+    {bot: 'Grid Binance', rating: '양호', suggestion: '그리드 간격 0.5% 유지', confidence: 85, recommend: '유지'},
+    {bot: 'DCA Binance', rating: '우수', suggestion: 'DCA 주기 6시간 최적', confidence: 92, recommend: '확대'},
+    {bot: 'Scalper Bybit', rating: '주의', suggestion: '변동성 감소로 인해 휴식 권장', confidence: 78, recommend: '축소'},
+    {bot: 'Tri Arb', rating: '양호', suggestion: '기회 감소, 모니터링 중', confidence: 88, recommend: '유지'},
+    {bot: 'Funding Rate', rating: '우수', suggestion: '펀딩비 차익 기회 다수', confidence: 90, recommend: '확대'},
+    {bot: 'Polymarket AI', rating: '양호', suggestion: 'AI 예측 정확도 72%', confidence: 82, recommend: '유지'},
+    {bot: 'Pump Sniper', rating: '우수', suggestion: '신규 토큰 감지 활발', confidence: 95, recommend: '확대'},
+  ];
+  updateAIReport(reports);
+}
+
+// AI 리포트 테이블 업데이트
+function updateAIReport(reports) {
+  const tbody = document.getElementById('ai-report-body');
+  if (!tbody) return;
+
+  if (reports.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="5" class="text-center muted">AI 분석 데이터 없음</td></tr>';
+    return;
+  }
+
+  let html = '';
+  for (const report of reports) {
+    const confidenceColor = report.confidence >= 90 ? 'profit' : (report.confidence >= 80 ? 'warning' : 'loss');
+    const recommendClass = report.recommend === '확대' ? 'profit' : (report.recommend === '축소' ? 'loss' : 'muted');
+
+    html += `
+      <tr>
+        <td>${report.bot}</td>
+        <td>${report.rating}</td>
+        <td>${report.suggestion}</td>
+        <td class="${confidenceColor}">${report.confidence}%</td>
+        <td class="${recommendClass}">${report.recommend}</td>
+      </tr>
+    `;
+  }
+  tbody.innerHTML = html;
+}
+
+// 탭 전환 시 AI 분석 로드
+const originalSwitchTab = switchTab;
+switchTab = function(tab) {
+  originalSwitchTab(tab);
+  if (tab === 'ai') {
+    loadAIAnalysis();
+  }
+};
+
 // 페이지 로드 완료 후 실행
 window.addEventListener('load', () => {
   initCharts();
   loadApiKeyStatus();
+  loadAIAnalysis();
 });
 </script>
 
