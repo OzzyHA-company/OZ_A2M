@@ -669,6 +669,7 @@ class BybitScalpingBot:
             "bot_id": self.bot_id,
             "bot_type": "scalping",
             "exchange": self.exchange_id,
+            "status": self.state.value,  # 'state' 대신 'status' 사용 (호환성)
             "state": self.state.value,
             "symbol": self.symbol,
             "capital": self.capital,

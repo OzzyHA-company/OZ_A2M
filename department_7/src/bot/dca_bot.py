@@ -442,6 +442,10 @@ class BinanceDCABot:
         if self.position.dca_count >= self.max_dca_count:
             return  # 최대 DCA 횟수 도달
 
+        # last_dca_price가 0이면 아직 초기 매수가 없는 것
+        if self.last_dca_price <= 0:
+            return
+
         # 현재가가 마지막 DCA 가격보다 dca_drop_pct 이상 하락했는지 확인
         drop_pct = (self.last_dca_price - self.current_price) / self.last_dca_price
 
