@@ -459,6 +459,116 @@ async def create_and_register_scalper_bot(
         return None
 
 
+# Binance Grid Bot 생성 및 등록 헬퍼
+async def create_and_register_grid_bot(
+    bot_id: str = "grid_binance_001",
+    capital: float = 11.0,
+    grid_count: int = 20,
+    grid_spacing_pct: float = 0.005,
+    sandbox: bool = False
+) -> Optional[Any]:
+    """
+    Binance Grid Bot 생성 및 등록
+
+    Args:
+        bot_id: 봇 ID
+        capital: 자본금
+        grid_count: 그리드 개수
+        grid_spacing_pct: 그리드 간격 (%)
+        sandbox: 샌드박스 모드
+
+    Returns:
+        생성된 봇 인스턴스
+    """
+    try:
+        from .grid_bot import BinanceGridBot
+
+        bot = BinanceGridBot(
+            bot_id=bot_id,
+            symbol="BTC/USDT",
+            exchange_id="binance",
+            capital=capital,
+            grid_count=grid_count,
+            grid_spacing_pct=grid_spacing_pct,
+            sandbox=sandbox,
+            telegram_alerts=True
+        )
+
+        config = BotConfig(
+            bot_id=bot_id,
+            bot_type=BotType.GRID,
+            exchange="binance",
+            symbol="BTC/USDT",
+            capital=capital,
+            sandbox=sandbox
+        )
+
+        manager = get_bot_manager()
+        manager.register_bot(config, bot)
+
+        logger.info(f"Grid bot {bot_id} created and registered")
+        return bot
+
+    except Exception as e:
+        logger.error(f"Failed to create grid bot: {e}")
+        return None
+
+
+# Binance DCA Bot 생성 및 등록 헬퍼
+async def create_and_register_dca_bot(
+    bot_id: str = "dca_binance_001",
+    capital: float = 14.0,
+    dca_drop_pct: float = 0.02,
+    take_profit_pct: float = 0.03,
+    sandbox: bool = False
+) -> Optional[Any]:
+    """
+    Binance DCA Bot 생성 및 등록
+
+    Args:
+        bot_id: 봇 ID
+        capital: 자본금
+        dca_drop_pct: DCA 매수 하띹 (%)
+        take_profit_pct: 익절 상승률 (%)
+        sandbox: 샌드박스 모드
+
+    Returns:
+        생성된 봇 인스턴스
+    """
+    try:
+        from .dca_bot import BinanceDCABot
+
+        bot = BinanceDCABot(
+            bot_id=bot_id,
+            symbol="BTC/USDT",
+            exchange_id="binance",
+            capital=capital,
+            dca_drop_pct=dca_drop_pct,
+            take_profit_pct=take_profit_pct,
+            sandbox=sandbox,
+            telegram_alerts=True
+        )
+
+        config = BotConfig(
+            bot_id=bot_id,
+            bot_type=BotType.DCA,
+            exchange="binance",
+            symbol="BTC/USDT",
+            capital=capital,
+            sandbox=sandbox
+        )
+
+        manager = get_bot_manager()
+        manager.register_bot(config, bot)
+
+        logger.info(f"DCA bot {bot_id} created and registered")
+        return bot
+
+    except Exception as e:
+        logger.error(f"Failed to create DCA bot: {e}")
+        return None
+
+
 async def main():
     """테스트용 메인 함수"""
     manager = get_bot_manager()
