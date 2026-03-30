@@ -272,11 +272,38 @@ body{background:var(--background);color:var(--text-primary);font-family:'Rajdhan
       </div>
     </div>
 
+    <!-- 실시간 시세 카드 -->
+    <div class="cards-row" style="margin-bottom:12px;">
+      <div class="stat-card accent-purple" style="position:relative;overflow:hidden;">
+        <div style="position:absolute;top:-20px;right:-20px;font-size:60px;opacity:0.05;">₿</div>
+        <div class="stat-label">BTC / USDT</div>
+        <div class="stat-value" id="price-btc" style="font-size:26px;">$--</div>
+        <div class="stat-sub" id="change-btc">--%</div>
+      </div>
+      <div class="stat-card accent-cyan" style="position:relative;overflow:hidden;">
+        <div style="position:absolute;top:-20px;right:-20px;font-size:60px;opacity:0.05;">Ξ</div>
+        <div class="stat-label">ETH / USDT</div>
+        <div class="stat-value" id="price-eth" style="font-size:26px;">$--</div>
+        <div class="stat-sub" id="change-eth">--%</div>
+      </div>
+      <div class="stat-card accent-green" style="position:relative;overflow:hidden;">
+        <div style="position:absolute;top:-20px;right:-20px;font-size:60px;opacity:0.05;">◎</div>
+        <div class="stat-label">SOL / USDT</div>
+        <div class="stat-value" id="price-sol" style="font-size:26px;">$--</div>
+        <div class="stat-sub" id="change-sol">--%</div>
+      </div>
+      <div class="stat-card" style="background:linear-gradient(135deg,rgba(98,0,238,0.15),rgba(3,218,198,0.15));border-color:rgba(187,134,252,0.3);">
+        <div class="stat-label">Fear & Greed</div>
+        <div class="stat-value" id="fear-greed" style="font-size:26px;">--</div>
+        <div class="stat-sub" id="fear-greed-label">--</div>
+      </div>
+    </div>
+
     <div class="cards-row">
       <div class="stat-card accent-purple">
         <div class="stat-label">총 포트폴리오 가치</div>
         <div class="stat-value" id="ov-total">$--</div>
-        <div class="stat-sub">11개 봇 운영중</div>
+        <div class="stat-sub" id="ov-total-sub">13개 봇 운영중</div>
       </div>
       <div class="stat-card accent-green">
         <div class="stat-label">오늘 수익</div>
@@ -289,10 +316,37 @@ body{background:var(--background);color:var(--text-primary);font-family:'Rajdhan
         <div class="stat-sub">대기 잔액</div>
       </div>
       <div class="stat-card accent-pink">
-        <div class="stat-label">가동 봇</div>
-        <div class="stat-value" id="ov-bots">--/11</div>
-        <div class="stat-sub" id="ov-bot-status">정상</div>
+        <div class="stat-label">가동 현황</div>
+        <div class="stat-value" id="ov-bots" style="display:flex;gap:8px;align-items:center;font-size:20px;">
+          <span id="bot-running" style="color:var(--profit);">--</span>
+          <span style="color:var(--text-secondary);font-size:14px;">/</span>
+          <span id="bot-idle" style="color:var(--warning);">--</span>
+          <span style="color:var(--text-secondary);font-size:14px;">/</span>
+          <span id="bot-stopped" style="color:var(--loss);">--</span>
+        </div>
+        <div class="stat-sub" id="ov-bot-status">🟢 정상</div>
       </div>
+    </div>
+
+    <!-- 봇별 실시간 수익 테이블 -->
+    <div class="card">
+      <div class="card-title"><span class="dot"></span> 봇별 실시간 수익 및 거래량</div>
+      <table class="data-table" id="bot-pnl-table">
+        <thead>
+          <tr>
+            <th>봇 이름</th>
+            <th>거래소</th>
+            <th>심볼</th>
+            <th>상태</th>
+            <th>현재 PnL</th>
+            <th>거래수</th>
+            <th>승률</th>
+          </tr>
+        </thead>
+        <tbody id="bot-pnl-tbody">
+          <tr><td colspan="7" class="text-center">데이터 로딩중...</td></tr>
+        </tbody>
+      </table>
     </div>
 
     <div class="grid-2">
@@ -919,7 +973,106 @@ function handleWebSocketMessage(data) {
   } else if (data.type === 'exchange_balances') {
     EXCHANGE_BALANCES = data.data;
     updateExchangeBalanceDisplay();
+  } else if (data.type === 'market_prices') {
+    // 실시간 시세 업데이트
+    updateMarketPrices(data.data);
+  } else if (data.type === 'bot_realtime_data') {
+    // 봇 실시간 데이터 업데이트
+    if (data.bot_id && data.data) {
+      BOTS[data.bot_id] = {...(BOTS[data.bot_id] || {}), ...data.data};
+      updateBotPnlTable();
+    }
+  } else if (data.type === 'api_usage') {
+    // API 사용량 업데이트
+    if (data.exchange && data.usage) {
+      API_USAGE[data.exchange] = data.usage;
+      updateApiUsageDisplay();
+    }
   }
+}
+
+// 실시간 시세 업데이트
+function updateMarketPrices(prices) {
+  if (!prices) return;
+
+  // BTC
+  if (prices['BTC/USDT']) {
+    const price = prices['BTC/USDT'];
+    const prevPrice = parseFloat(document.getElementById('tk-btc')?.dataset?.price || 0);
+    const change = prevPrice ? ((price - prevPrice) / prevPrice * 100) : 0;
+
+    document.getElementById('tk-btc').textContent = `$${price.toLocaleString()}`;
+    document.getElementById('tk-btc').dataset.price = price;
+    document.getElementById('tk-btc2').textContent = `$${price.toLocaleString()}`;
+
+    document.getElementById('price-btc').textContent = `$${price.toLocaleString()}`;
+    const changeEl = document.getElementById('change-btc');
+    changeEl.textContent = `${change >= 0 ? '+' : ''}${change.toFixed(2)}%`;
+    changeEl.className = change >= 0 ? 'stat-sub profit' : 'stat-sub loss';
+  }
+
+  // ETH
+  if (prices['ETH/USDT']) {
+    const price = prices['ETH/USDT'];
+    document.getElementById('tk-eth').textContent = `$${price.toLocaleString()}`;
+    document.getElementById('tk-eth2').textContent = `$${price.toLocaleString()}`;
+    document.getElementById('price-eth').textContent = `$${price.toLocaleString()}`;
+  }
+
+  // SOL
+  if (prices['SOL/USDT']) {
+    const price = prices['SOL/USDT'];
+    document.getElementById('tk-sol').textContent = `$${price.toLocaleString()}`;
+    document.getElementById('tk-sol2').textContent = `$${price.toLocaleString()}`;
+    document.getElementById('price-sol').textContent = `$${price.toLocaleString()}`;
+  }
+}
+
+// 봇별 실시간 수익 테이블 업데이트
+function updateBotPnlTable() {
+  const tbody = document.getElementById('bot-pnl-tbody');
+  if (!tbody) return;
+
+  let html = '';
+  let running = 0, idle = 0, stopped = 0;
+  let totalPnl = 0, totalTrades = 0;
+
+  for (const [botId, bot] of Object.entries(BOTS)) {
+    const status = bot.status || 'stopped';
+    if (status === 'running') running++;
+    else if (status === 'idle') idle++;
+    else stopped++;
+
+    const pnl = bot.pnl || 0;
+    totalPnl += pnl;
+    totalTrades += bot.trades || 0;
+
+    const statusIcon = status === 'running' ? '🟢' : (status === 'idle' ? '🟡' : '🔴');
+    const pnlClass = pnl >= 0 ? 'profit' : 'loss';
+
+    html += `
+      <tr id="pnl-row-${botId}">
+        <td><strong>${bot.name || botId}</strong></td>
+        <td>${bot.exchange || '-'}</td>
+        <td>${bot.symbol || '-'}</td>
+        <td>${statusIcon} ${status}</td>
+        <td class="${pnlClass}">${pnl >= 0 ? '+' : ''}$${pnl.toFixed(2)}</td>
+        <td>${bot.trades || 0}</td>
+        <td>${bot.win_rate || 0}%</td>
+      </tr>
+    `;
+  }
+
+  tbody.innerHTML = html || '<tr><td colspan="7" class="text-center">데이터 없음</td></tr>';
+
+  // 가동 현황 업데이트
+  document.getElementById('bot-running').textContent = running;
+  document.getElementById('bot-idle').textContent = idle;
+  document.getElementById('bot-stopped').textContent = stopped;
+
+  // 총 수익 업데이트
+  document.getElementById('ov-today').textContent = (totalPnl >= 0 ? '+' : '') + '$' + totalPnl.toFixed(2);
+  document.getElementById('ov-today').className = 'stat-value ' + (totalPnl >= 0 ? 'profit' : 'loss');
 }
 
 // 탭 전환 - 7부서 구조
@@ -1320,9 +1473,10 @@ function botControl(botId, action) {
 async function updateOverview() {
   try {
     // API에서 실제 데이터 로드
-    const [statusRes, profitRes] = await Promise.all([
+    const [statusRes, profitRes, botsRes] = await Promise.all([
       fetch('/api/status').then(r => r.json()),
-      fetch('/api/profit').then(r => r.json())
+      fetch('/api/profit').then(r => r.json()),
+      fetch('/api/bots').then(r => r.json())
     ]);
 
     const totalCapital = statusRes.total_capital || 0;
@@ -1335,23 +1489,56 @@ async function updateOverview() {
     const totalBots = statusRes.total_bots || 0;
 
     document.getElementById('ov-total').textContent = `$${totalCapital.toFixed(2)}`;
+    document.getElementById('ov-total-sub').textContent = `${totalBots}개 봇 운영중`;
+
     document.getElementById('ov-today').textContent = `${todayProfit >= 0 ? '+' : ''}$${todayProfit.toFixed(2)}`;
     document.getElementById('ov-today').className = 'stat-value ' + (todayProfit >= 0 ? 'profit' : 'loss');
     document.getElementById('ov-today-sub').textContent = `누적 $${totalProfit.toFixed(2)}`;
+
     document.getElementById('ov-withdraw').textContent = `$${withdrawable.toFixed(2)}`;
-    document.getElementById('wd-available').textContent = `$${withdrawable.toFixed(2)}`;
-    document.getElementById('ov-bots').textContent = `${runningBots}/${totalBots}`;
+    const wdEl = document.getElementById('wd-available');
+    if (wdEl) wdEl.textContent = `$${withdrawable.toFixed(2)}`;
+
+    // 봇 상태 카운트
+    let running = 0, idle = 0, stopped = 0;
+    if (Array.isArray(botsRes)) {
+      botsRes.forEach(bot => {
+        BOTS[bot.bot_id] = bot;
+        if (bot.status === 'running') running++;
+        else if (bot.status === 'idle') idle++;
+        else stopped++;
+      });
+    }
+
+    document.getElementById('bot-running').textContent = running;
+    document.getElementById('bot-idle').textContent = idle;
+    document.getElementById('bot-stopped').textContent = stopped;
 
     // 상태 텍스트 업데이트
     const statusEl = document.getElementById('ov-bot-status');
     if (statusEl) {
-      statusEl.textContent = runningBots === totalBots ? '모든 봇 정상' : `${totalBots - runningBots}개 봇 대기중`;
+      statusEl.textContent = running === totalBots ? '🟢 모든 봇 정상' : `🟡 ${totalBots - running}개 봇 대기중`;
     }
+
+    // 봇별 수익 테이블 업데이트
+    updateBotPnlTable();
 
     // 수익 차트 업데이트
     if (charts.profit && profitRes.daily) {
       charts.profit.data.datasets[0].data = profitRes.daily;
       charts.profit.update();
+    }
+
+    // Fear & Greed (Mock - 실제로는 API에서 가져와야 함)
+    const fearGreed = Math.floor(Math.random() * 40) + 30; // 30-70 범위
+    const fgEl = document.getElementById('fear-greed');
+    const fgLabelEl = document.getElementById('fear-greed-label');
+    if (fgEl) {
+      fgEl.textContent = fearGreed;
+      fgEl.style.color = fearGreed > 50 ? 'var(--profit)' : (fearGreed < 30 ? 'var(--loss)' : 'var(--warning)');
+    }
+    if (fgLabelEl) {
+      fgLabelEl.textContent = fearGreed > 50 ? 'Greed' : (fearGreed < 30 ? 'Fear' : 'Neutral');
     }
 
   } catch (e) {

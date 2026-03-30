@@ -24,6 +24,7 @@ sys.path.insert(0, str(project_root))
 from lib.core.logger import get_logger
 from department_1.src.monitoring.api_monitor import api_monitor
 from department_1.src.monitoring.log_viewer import log_viewer
+from department_1.src.monitoring.security_scanner import security_scanner
 
 logger = get_logger(__name__)
 
@@ -61,14 +62,42 @@ class DashboardBotManager:
         self.exchange_balances: Dict[str, Dict] = {}
         self.last_balance_update: Optional[datetime] = None
 
-        # API 사용량 추적
-        self.api_usage: Dict[str, Dict] = {
-            'binance': {'calls': 0, 'limit': 1200, 'remaining': 1200},
-            'bybit': {'calls': 0, 'limit': 100, 'remaining': 100},
-            'hyperliquid': {'calls': 0, 'limit': 1000, 'remaining': 1000},
-            'polymarket': {'calls': 0, 'limit': 100, 'remaining': 100},
-            'helius': {'calls': 0, 'limit': 1000, 'remaining': 1000},
+        # API 사용량 추적 (스위칭/우선순위 지원)
+        self.api_tiers = {
+            'tier1': ['binance'],      # 1200 req/min - 기본 데이터
+            'tier2': ['bybit'],        # 100 req/min - 보조 데이터, 페일오버
+            'tier3': ['hyperliquid'],  # 1000 req/min - Perp 데이터
         }
+        self.api_usage: Dict[str, Dict] = {
+            'binance': {
+                'calls': 0, 'limit': 1200, 'remaining': 1200,
+                'tier': 'tier1', 'priority': 1, 'status': 'active',
+                'circuit_breaker': {'failures': 0, 'last_failure': None, 'open': False}
+            },
+            'bybit': {
+                'calls': 0, 'limit': 100, 'remaining': 100,
+                'tier': 'tier2', 'priority': 2, 'status': 'standby',
+                'circuit_breaker': {'failures': 0, 'last_failure': None, 'open': False}
+            },
+            'hyperliquid': {
+                'calls': 0, 'limit': 1000, 'remaining': 1000,
+                'tier': 'tier3', 'priority': 3, 'status': 'active',
+                'circuit_breaker': {'failures': 0, 'last_failure': None, 'open': False}
+            },
+            'polymarket': {
+                'calls': 0, 'limit': 100, 'remaining': 100,
+                'tier': 'tier3', 'priority': 4, 'status': 'active',
+                'circuit_breaker': {'failures': 0, 'last_failure': None, 'open': False}
+            },
+            'helius': {
+                'calls': 0, 'limit': 1000, 'remaining': 1000,
+                'tier': 'tier3', 'priority': 5, 'status': 'active',
+                'circuit_breaker': {'failures': 0, 'last_failure': None, 'open': False}
+            },
+        }
+        self.active_api = 'binance'  # 현재 활성 API
+        self.api_failover_threshold = 0.8  # 80% 사용 시 전환
+        self.circuit_breaker_threshold = 5  # 5회 실패 시 차단
 
         # 시스템 메트릭스
         self.system_metrics: Dict[str, Any] = {
@@ -78,7 +107,146 @@ class DashboardBotManager:
             'docker': 0.0,
         }
 
+        # MQTT-Redis Bridge 연동
+        self.mqtt_bridge = None
+        self.redis_cache = None
+        self._init_redis()
+
         self._init_bots()
+
+    def _init_redis(self):
+        """Redis 캐시 초기화"""
+        try:
+            from lib.cache.redis_client import RedisCache
+            self.redis_cache = RedisCache()
+            logger.info("Redis cache initialized")
+        except Exception as e:
+            logger.warning(f"Redis cache initialization failed: {e}")
+            self.redis_cache = None
+
+    async def start_mqtt_bridge(self):
+        """MQTT-Redis Bridge 시작"""
+        try:
+            from department_1.src.mqtt_redis_bridge import MqttRedisBridge
+            self.mqtt_bridge = MqttRedisBridge()
+            started = await self.mqtt_bridge.start()
+            if started:
+                logger.info("MQTT-Redis Bridge started successfully")
+                # Bridge 데이터 모니터링 태스크 시작
+                asyncio.create_task(self._monitor_bridge_data())
+            else:
+                logger.error("Failed to start MQTT-Redis Bridge")
+        except Exception as e:
+            logger.error(f"MQTT Bridge start error: {e}")
+
+    async def _monitor_bridge_data(self):
+        """Bridge 데이터 모니터링 및 브로드캐스트"""
+        while self.mqtt_bridge and self.mqtt_bridge._running:
+            try:
+                if self.redis_cache:
+                    # 봇 상태 데이터 조회
+                    for bot_id in self.bots.keys():
+                        bot_data = await self.redis_cache.get(f"bot:{bot_id}:status")
+                        if bot_data:
+                            await self.broadcast_update({
+                                'type': 'bot_realtime_data',
+                                'bot_id': bot_id,
+                                'data': bot_data
+                            })
+
+                    # 시장 데이터 조회
+                    prices = await self.redis_cache.get_market_prices()
+                    if prices:
+                        await self.broadcast_update({
+                            'type': 'market_prices',
+                            'data': prices
+                        })
+
+            except Exception as e:
+                logger.error(f"Bridge monitoring error: {e}")
+
+            await asyncio.sleep(5)  # 5초마다 체크
+
+    # API 스위칭 및 회로 차단기 로직
+    async def track_api_call(self, exchange: str, success: bool = True):
+        """API 호출 추적 및 스위칭 로직"""
+        if exchange not in self.api_usage:
+            return
+
+        usage = self.api_usage[exchange]
+        usage['calls'] += 1
+        usage['remaining'] = max(0, usage['limit'] - usage['calls'])
+
+        # 회로 차단기 로직
+        cb = usage['circuit_breaker']
+        if not success:
+            cb['failures'] += 1
+            cb['last_failure'] = datetime.utcnow().isoformat()
+            if cb['failures'] >= self.circuit_breaker_threshold:
+                cb['open'] = True
+                usage['status'] = 'circuit_open'
+                logger.warning(f"Circuit breaker opened for {exchange}")
+                await self._failover_to_backup(exchange)
+        else:
+            # 성공 시 실패 카운트 리셋
+            cb['failures'] = max(0, cb['failures'] - 1)
+
+        # Rate Limit 체크 (80% 도달 시)
+        usage_pct = usage['calls'] / usage['limit']
+        if usage_pct >= self.api_failover_threshold and usage['status'] == 'active':
+            logger.warning(f"{exchange} rate limit at {usage_pct:.1%}, initiating failover")
+            await self._failover_to_backup(exchange)
+
+        # WebSocket으로 API 사용량 브로드캐스트
+        await self.broadcast_update({
+            'type': 'api_usage',
+            'exchange': exchange,
+            'usage': usage
+        })
+
+    async def _failover_to_backup(self, failed_exchange: str):
+        """백업 API로 페일오버"""
+        failed_tier = self.api_usage[failed_exchange]['tier']
+
+        # 동일 티어나 하위 티어에서 백업 API 찾기
+        backup_candidates = []
+        for ex, data in self.api_usage.items():
+            if ex != failed_exchange and data['status'] in ['active', 'standby']:
+                if not data['circuit_breaker']['open']:
+                    backup_candidates.append((ex, data['priority']))
+
+        if backup_candidates:
+            # 우선순위가 가장 높은 백업 선택
+            backup_candidates.sort(key=lambda x: x[1])
+            new_api = backup_candidates[0][0]
+
+            # 상태 업데이트
+            self.api_usage[failed_exchange]['status'] = 'failed'
+            self.active_api = new_api
+            self.api_usage[new_api]['status'] = 'active'
+
+            logger.info(f"Failover: {failed_exchange} -> {new_api}")
+            await self.broadcast_update({
+                'type': 'api_failover',
+                'from': failed_exchange,
+                'to': new_api,
+                'reason': 'rate_limit' if self.api_usage[failed_exchange]['calls'] / self.api_usage[failed_exchange]['limit'] >= self.api_failover_threshold else 'circuit_breaker'
+            })
+
+    def get_api_priority_list(self) -> List[Dict]:
+        """API 우선순위 목록 반환"""
+        apis = []
+        for ex, data in self.api_usage.items():
+            apis.append({
+                'exchange': ex,
+                'priority': data['priority'],
+                'tier': data['tier'],
+                'status': data['status'],
+                'usage_pct': data['calls'] / data['limit'] * 100,
+                'is_active': self.active_api == ex,
+                'circuit_breaker': data['circuit_breaker']['open']
+            })
+        return sorted(apis, key=lambda x: x['priority'])
 
     def _init_bots(self):
         """실제 봇 인스턴스 초기화"""
@@ -222,53 +390,26 @@ class DashboardBotManager:
         return total
 
     async def update_exchange_balances(self):
-        """거래소 잔액 업데이트"""
+        """거래소 잔액 업데이트 (API 스위칭 및 추적 포함)"""
         try:
             import ccxt.async_support as ccxt
 
-            # Binance 잔액 조회
-            try:
-                api_key = os.environ.get('BINANCE_API_KEY')
-                api_secret = os.environ.get('BINANCE_API_SECRET')
-                if api_key and api_secret:
-                    exchange = ccxt.binance({
-                        'apiKey': api_key,
-                        'secret': api_secret,
-                        'enableRateLimit': True,
-                    })
-                    balance = await exchange.fetch_balance()
-                    self.exchange_balances['binance'] = {
-                        'USDT': balance.get('USDT', {}).get('free', 0),
-                        'BTC': balance.get('BTC', {}).get('free', 0),
-                        'total_usdt': balance.get('USDT', {}).get('total', 0),
-                    }
-                    await exchange.close()
-                    self.api_usage['binance']['calls'] += 1
-            except Exception as e:
-                logger.warning(f"Binance balance fetch failed: {e}")
-                self.exchange_balances['binance'] = {'error': str(e)}
+            # 활성 API 확인 및 페일오버 로직
+            active_apis = self._get_active_apis_for_balance()
 
-            # Bybit 잔액 조회
-            try:
-                api_key = os.environ.get('BYBIT_API_KEY')
-                api_secret = os.environ.get('BYBIT_API_SECRET')
-                if api_key and api_secret:
-                    exchange = ccxt.bybit({
-                        'apiKey': api_key,
-                        'secret': api_secret,
-                        'enableRateLimit': True,
-                    })
-                    balance = await exchange.fetch_balance()
-                    self.exchange_balances['bybit'] = {
-                        'USDT': balance.get('USDT', {}).get('free', 0),
-                        'SOL': balance.get('SOL', {}).get('free', 0),
-                        'total_usdt': balance.get('USDT', {}).get('total', 0),
-                    }
-                    await exchange.close()
-                    self.api_usage['bybit']['calls'] += 1
-            except Exception as e:
-                logger.warning(f"Bybit balance fetch failed: {e}")
-                self.exchange_balances['bybit'] = {'error': str(e)}
+            for exchange_name in active_apis:
+                try:
+                    if exchange_name == 'binance':
+                        await self._fetch_binance_balance(ccxt)
+                    elif exchange_name == 'bybit':
+                        await self._fetch_bybit_balance(ccxt)
+                    # API 호출 성공 추적
+                    await self.track_api_call(exchange_name, success=True)
+                except Exception as e:
+                    logger.warning(f"{exchange_name} balance fetch failed: {e}")
+                    # API 호출 실패 추적 (회로 차단기)
+                    await self.track_api_call(exchange_name, success=False)
+                    self.exchange_balances[exchange_name] = {'error': str(e)}
 
             self.last_balance_update = datetime.utcnow()
 
@@ -281,6 +422,52 @@ class DashboardBotManager:
 
         except Exception as e:
             logger.error(f"Exchange balance update error: {e}")
+
+    def _get_active_apis_for_balance(self) -> List[str]:
+        """잔액 조회용 활성 API 목록 반환"""
+        # 우선순위: Tier1 > Tier2 > Tier3
+        apis = []
+        for ex, data in self.api_usage.items():
+            if data['status'] in ['active', 'standby'] and not data['circuit_breaker']['open']:
+                apis.append((ex, data['priority']))
+        apis.sort(key=lambda x: x[1])
+        return [ex for ex, _ in apis[:2]]  # 상위 2개만 사용
+
+    async def _fetch_binance_balance(self, ccxt_module):
+        """Binance 잔액 조회"""
+        api_key = os.environ.get('BINANCE_API_KEY')
+        api_secret = os.environ.get('BINANCE_API_SECRET')
+        if api_key and api_secret:
+            exchange = ccxt_module.binance({
+                'apiKey': api_key,
+                'secret': api_secret,
+                'enableRateLimit': True,
+            })
+            balance = await exchange.fetch_balance()
+            self.exchange_balances['binance'] = {
+                'USDT': balance.get('USDT', {}).get('free', 0),
+                'BTC': balance.get('BTC', {}).get('free', 0),
+                'total_usdt': balance.get('USDT', {}).get('total', 0),
+            }
+            await exchange.close()
+
+    async def _fetch_bybit_balance(self, ccxt_module):
+        """Bybit 잔액 조회"""
+        api_key = os.environ.get('BYBIT_API_KEY')
+        api_secret = os.environ.get('BYBIT_API_SECRET')
+        if api_key and api_secret:
+            exchange = ccxt_module.bybit({
+                'apiKey': api_key,
+                'secret': api_secret,
+                'enableRateLimit': True,
+            })
+            balance = await exchange.fetch_balance()
+            self.exchange_balances['bybit'] = {
+                'USDT': balance.get('USDT', {}).get('free', 0),
+                'SOL': balance.get('SOL', {}).get('free', 0),
+                'total_usdt': balance.get('USDT', {}).get('total', 0),
+            }
+            await exchange.close()
 
     def get_withdrawable_amount(self) -> float:
         """출금 가능 금액 계산"""
@@ -606,6 +793,58 @@ async def get_api_calls(exchange: str, limit: int = 100):
     return {
         "exchange": exchange,
         "calls": api_monitor.get_recent_calls(exchange, limit)
+    }
+
+
+# API 스위칭 및 우선순위 관련 엔드포인트
+@app.get("/api/api-priority")
+async def get_api_priority():
+    """API 우선순위 및 스위칭 상태"""
+    return {
+        "apis": bot_manager.get_api_priority_list(),
+        "active_api": bot_manager.active_api,
+        "failover_threshold": bot_manager.api_failover_threshold,
+        "circuit_breaker_threshold": bot_manager.circuit_breaker_threshold,
+        "timestamp": datetime.utcnow().isoformat()
+    }
+
+
+@app.post("/api/api-priority/switch")
+async def switch_api_priority(exchange: str):
+    """수동 API 우선순위 전환"""
+    if exchange not in bot_manager.api_usage:
+        raise HTTPException(status_code=400, detail=f"Unknown exchange: {exchange}")
+
+    old_api = bot_manager.active_api
+    bot_manager.active_api = exchange
+    bot_manager.api_usage[exchange]['status'] = 'active'
+    if old_api != exchange:
+        bot_manager.api_usage[old_api]['status'] = 'standby'
+
+    return {
+        "success": True,
+        "previous": old_api,
+        "current": exchange,
+        "timestamp": datetime.utcnow().isoformat()
+    }
+
+
+@app.post("/api/api-priority/reset")
+async def reset_api_circuit_breaker(exchange: str):
+    """회로 차단기 수동 리셋"""
+    if exchange not in bot_manager.api_usage:
+        raise HTTPException(status_code=400, detail=f"Unknown exchange: {exchange}")
+
+    cb = bot_manager.api_usage[exchange]['circuit_breaker']
+    cb['open'] = False
+    cb['failures'] = 0
+    bot_manager.api_usage[exchange]['status'] = 'standby'
+
+    return {
+        "success": True,
+        "exchange": exchange,
+        "message": "Circuit breaker reset",
+        "timestamp": datetime.utcnow().isoformat()
     }
 
 
@@ -1096,49 +1335,89 @@ async def get_verification_pipeline():
 # D3: 보안팀 - 보안
 @app.get("/api/security/status")
 async def get_security_status():
-    """제3부서: 보안 상태"""
+    """제3부서: 보안 상태 (실제 스캐너 연동)"""
+    # 최근 스캔 결과에서 위협 요약
+    recent_scans = security_scanner.get_recent_scans(1)
+    threats = {"critical": 0, "high": 0, "medium": 0, "low": 0}
+
+    if recent_scans:
+        threats = recent_scans[0].get('summary', threats)
+
+    # API 키 상태 (실제 사용량 기반)
+    api_status = {}
+    for ex, data in bot_manager.api_usage.items():
+        cb = data['circuit_breaker']
+        api_status[ex] = {
+            "status": "secure" if not cb['open'] else "compromised",
+            "last_used": f"{data['calls']} calls",
+            "failures": cb['failures'],
+            "circuit_open": cb['open']
+        }
+
     return {
         "department": "Security Team",
-        "threats": {
-            "critical": 0,
-            "high": 0,
-            "medium": 2,
-            "low": 0
-        },
-        "api_keys": {
-            "binance": {"status": "secure", "last_used": "2min ago", "rotation_due": "15 days"},
-            "bybit": {"status": "secure", "last_used": "5min ago", "rotation_due": "20 days"},
-            "hyperliquid": {"status": "secure", "last_used": "1min ago", "rotation_due": "12 days"},
-        },
+        "threats": threats,
+        "api_keys": api_status,
         "nuclei_scan": {
-            "last_scan": datetime.utcnow().isoformat(),
+            "last_scan": recent_scans[0]['timestamp'] if recent_scans else None,
             "endpoints_scanned": 15,
-            "vulnerabilities_found": 0,
-            "status": "passed"
+            "vulnerabilities_found": sum(threats.values()),
+            "status": "passed" if sum(threats.values()) == 0 else "warning",
+            "recent_scans": len(recent_scans)
         }
     }
+
 
 @app.get("/api/security/nuclei")
 async def get_nuclei_results():
-    """Nuclei 보안 스캔 결과"""
-    return {
-        "last_scan": "2026-03-30T18:00:00",
-        "endpoints_scanned": 15,
-        "vulnerabilities": [],
-        "summary": {
-            "critical": 0,
-            "high": 0,
-            "medium": 0,
-            "low": 0,
-            "info": 2
+    """Nuclei 스타일 보안 스캔 결과"""
+    recent_scans = security_scanner.get_recent_scans(1)
+
+    if not recent_scans:
+        return {
+            "last_scan": None,
+            "message": "No scans performed yet. Run POST /api/security/nuclei/scan",
+            "vulnerabilities": [],
+            "summary": {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0}
         }
+
+    latest = recent_scans[0]
+    return {
+        "last_scan": latest['timestamp'],
+        "scan_id": latest['scan_id'],
+        "target": latest['target'],
+        "status": latest['status'],
+        "vulnerabilities": latest['vulnerabilities'],
+        "summary": latest['summary']
     }
+
 
 @app.post("/api/security/nuclei/scan")
 async def run_nuclei_scan():
-    """Nuclei 보안 스캔 실행"""
-    # TODO: 실제 Nuclei 스캔 실행
-    return {"status": "started", "scan_id": f"scan_{datetime.utcnow().timestamp()}"}
+    """보안 스캔 실행 (Nuclei 스타일)"""
+    if security_scanner.scan_in_progress:
+        return {"status": "already_running", "message": "Scan already in progress"}
+
+    # 백그라운드에서 스캔 실행
+    asyncio.create_task(security_scanner.run_scan())
+
+    return {
+        "status": "started",
+        "scan_id": f"scan_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}",
+        "timestamp": datetime.utcnow().isoformat(),
+        "message": "Security scan started in background"
+    }
+
+
+@app.get("/api/security/vulnerabilities")
+async def get_vulnerabilities(severity: Optional[str] = None):
+    """취약점 목록 조회"""
+    vulns = security_scanner.get_vulnerabilities(severity)
+    return {
+        "count": len(vulns),
+        "severity_filter": severity,
+        "vulnerabilities": vulns
+    }
 
 # D4: 유지보수관리센터 - 시스템 (기존 API 확장)
 @app.get("/api/departments/4/status")
@@ -1316,6 +1595,13 @@ async def startup_event():
 
 async def main():
     """서버 실행"""
+    # MQTT-Redis Bridge 시작
+    await bot_manager.start_mqtt_bridge()
+
+    # 백그라운드 업데이트 태스크 시작
+    asyncio.create_task(background_updates())
+    asyncio.create_task(periodic_balance_update())
+
     config = uvicorn.Config(
         app,
         host="0.0.0.0",
@@ -1324,6 +1610,16 @@ async def main():
     )
     server = uvicorn.Server(config)
     await server.serve()
+
+
+async def periodic_balance_update():
+    """주기적 잔액 업데이트 (30초마다)"""
+    while True:
+        try:
+            await bot_manager.update_exchange_balances()
+        except Exception as e:
+            logger.error(f"Periodic balance update error: {e}")
+        await asyncio.sleep(30)
 
 
 if __name__ == "__main__":
