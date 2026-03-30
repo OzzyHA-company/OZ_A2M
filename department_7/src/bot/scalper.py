@@ -704,6 +704,10 @@ class ScalpingBotAdapter:
         return self.bot.get_status()
 
 
+# 하위 호환성을 위한 별칭
+ScalpingBot = BybitScalpingBot
+
+
 async def main():
     """단독 실행용 메인 함수"""
     bot = BybitScalpingBot(

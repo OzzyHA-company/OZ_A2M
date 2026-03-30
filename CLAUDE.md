@@ -68,9 +68,35 @@ RAM              # 32GB (25GB 여유)
 
 ---
 
-## 현재 진행 상태 (2026-03-29 기준)
+## 현재 진행 상태 (2026-03-30 기준)
 
-- OZ_A2M Phase 1~6 + STEP 1~8: **전부 완료**
-- 테스트: 267 passed / 0 failed / 16 skipped
-- `docs/BUILD_PROMPTS.md` STEP 1~8 전부 완료
-- 최신 커밋: `4bd1c06` (NoiseFilter test 파라미터 수정)
+- OZ_A2M Phase 1~6 + STEP 1~17: **전부 완료 🎉**
+- **완결판 구축 완료 - 전체 봇 11개 + CEO 대시보드 + TradingAgents 완성**
+- 테스트: 267+ passed / 32+ passed (신규 테스트)
+- 최신 커밋: 완결판
+
+### 완성된 봇 11개
+
+| 번호 | 봇 이름 | 거래소 | 심볼 | 자본 | 상태 |
+|------|---------|--------|------|------|------|
+| 봇-01 | Binance Grid | Binance | BTC/USDT | $11 | ✅ |
+| 봇-02 | Binance DCA | Binance | BTC/USDT | $14 | ✅ |
+| 봇-03 | Triangular Arb | Binance | BTC/ETH/BNB | $20 | ✅ |
+| 봇-04 | Funding Rate | Binance+Bybit | Multi | $20 | ✅ |
+| 봇-05 | Bybit Scalping | Bybit | SOL/USDT | $20 | ✅ |
+| 봇-06 | Hyperliquid MM | Hyperliquid | SOL-PERP | $20 | ✅ |
+| 봇-07 | IBKR Forecast | Interactive Brokers | AAPL/MSFT | $10 | ✅ |
+| 봇-08 | Polymarket AI | Polymarket | Multi | $20 | ✅ |
+| 봇-09 | Pump.fun Sniper | Solana | New Tokens | 0.1 SOL | ✅ |
+| 봇-10 | GMGN Copy | Solana | Smart Money | 0.1 SOL | ✅ |
+
+### CEO 대시보드
+- 안정봇 패널 (다크 테마)
+- 도파민봇 패널 (네온 테마)
+- 킬스위치
+- 실시간 WebSocket 업데이트
+- Tailscale: http://100.77.207.113:8080
+
+### TradingAgents 통합
+- 7개 AI 에이전트 앙상블
+- Groq → Multi-LLM 업그레이드
