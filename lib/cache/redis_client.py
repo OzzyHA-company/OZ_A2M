@@ -268,6 +268,99 @@ class RedisCache:
         except Exception as e:
             logger.error(f"Failed to set agent status: {e}")
 
+    async def set_agent_status(self, agent_id: str, status: str):
+        """에이전트 상태 변경"""
+        if not self._client:
+            return
+
+        key = self.KEY_AGENT.format(agent_id=agent_id)
+        try:
+            data = await self._client.get(key)
+            if data:
+                agent_data = json.loads(data)
+                agent_data["status"] = status
+                agent_data["last_updated"] = datetime.utcnow().isoformat()
+                await self._client.set(key, json.dumps(agent_data))
+        except Exception as e:
+            logger.error(f"Failed to set agent status: {e}")
+
+    # === 봇 상태 관리 ===
+
+    KEY_BOT_STATUS = "oz:a2m:bot:{bot_id}:status"
+    KEY_BOTS_LIST = "oz:a2m:bots:active"
+
+    async def set_bot_status(
+        self,
+        bot_id: str,
+        status: str,
+        bot_type: str = "unknown",
+        capital: float = 0,
+        pnl: float = 0,
+        trades: int = 0,
+        mock_mode: bool = False,
+        exchange: str = "unknown",
+        symbol: str = "unknown",
+        ttl_seconds: int = 30
+    ):
+        """봇 상태 저장"""
+        if not self._client:
+            return
+
+        key = self.KEY_BOT_STATUS.format(bot_id=bot_id)
+        data = {
+            "bot_id": bot_id,
+            "status": status,
+            "type": bot_type,
+            "capital": capital,
+            "pnl": pnl,
+            "trades": trades,
+            "mock_mode": mock_mode,
+            "exchange": exchange,
+            "symbol": symbol,
+            "last_update": datetime.utcnow().isoformat()
+        }
+
+        try:
+            await self._client.setex(key, ttl_seconds, json.dumps(data))
+            await self._client.sadd(self.KEY_BOTS_LIST, bot_id)
+            logger.debug(f"Bot status saved: {bot_id} -> {status}")
+        except Exception as e:
+            logger.error(f"Failed to save bot status: {e}")
+
+    async def get_bot_status(self, bot_id: str) -> Optional[Dict[str, Any]]:
+        """봇 상태 조회"""
+        if not self._client:
+            return None
+
+        key = self.KEY_BOT_STATUS.format(bot_id=bot_id)
+        try:
+            data = await self._client.get(key)
+            if data:
+                return json.loads(data)
+            return None
+        except Exception as e:
+            logger.error(f"Failed to get bot status: {e}")
+            return None
+
+    async def list_bot_statuses(self) -> List[Dict[str, Any]]:
+        """모든 봇 상태 조회"""
+        if not self._client:
+            return []
+
+        try:
+            bot_ids = await self._client.smembers(self.KEY_BOTS_LIST)
+            bots = []
+            for bot_id in bot_ids:
+                bot_data = await self.get_bot_status(bot_id)
+                if bot_data:
+                    bots.append(bot_data)
+                else:
+                    await self._client.srem(self.KEY_BOTS_LIST, bot_id)
+            return bots
+        except Exception as e:
+            logger.error(f"Failed to list bot statuses: {e}")
+            return []
+
     # === 시장 스냅샷 ===
 
     async def set_market_snapshot(

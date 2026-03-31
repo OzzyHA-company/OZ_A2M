@@ -26,6 +26,7 @@ from dotenv import load_dotenv
 load_dotenv('/home/ozzy-claw/.ozzy-secrets/master.env', override=True)
 
 from lib.core.logger import get_logger
+from lib.cache.redis_client import get_redis_cache
 from department_1.src.monitoring.api_monitor import api_monitor
 from department_1.src.monitoring.log_viewer import log_viewer
 from department_1.src.monitoring.security_scanner import security_scanner
@@ -305,8 +306,33 @@ class DashboardBotManager:
         except Exception as e:
             logger.error(f"Bot initialization error: {e}")
 
-    def get_bot_status(self, bot_id: str) -> Optional[Dict]:
-        """봇 상태 조회"""
+    async def get_bot_status(self, bot_id: str) -> Optional[Dict]:
+        """봇 상태 조회 (Redis 우선, 로컬 폴리백)"""
+        # Redis에서 먼저 조회
+        if self.redis_cache:
+            try:
+                # Ensure Redis is connected
+                if not self.redis_cache._client:
+                    await self.redis_cache.connect()
+                redis_status = await self.redis_cache.get_bot_status(bot_id)
+                if redis_status:
+                    return {
+                        'bot_id': bot_id,
+                        'name': redis_status.get('bot_id', bot_id),
+                        'type': redis_status.get('type', 'unknown'),
+                        'status': redis_status.get('status', 'unknown'),
+                        'mock_mode': redis_status.get('mock_mode', False),
+                        'exchange': redis_status.get('exchange', 'Unknown'),
+                        'symbol': redis_status.get('symbol', 'Multi'),
+                        'capital': redis_status.get('capital', 0),
+                        'pnl': redis_status.get('pnl', 0),
+                        'trades': redis_status.get('trades', 0),
+                        'win_rate': 0,
+                    }
+            except Exception as e:
+                logger.debug(f"Redis status read failed for {bot_id}: {e}")
+
+        # Redis 실패 시 로컬 봇 인스턴스에서 조회
         if bot_id not in self.bots:
             return None
 
@@ -365,15 +391,30 @@ class DashboardBotManager:
             return '/'.join(bot.symbols[:2])
         return 'Multi'
 
-    def get_all_bots_status(self) -> List[Dict]:
+    async def get_all_bots_status(self) -> List[Dict]:
         """모든 봇 상태 조회"""
-        return [self.get_bot_status(bid) for bid in self.bots.keys()]
+        statuses = []
+        # Redis에서 모든 봇 상태 조회 시도
+        if self.redis_cache:
+            try:
+                redis_bots = await self.redis_cache.list_bot_statuses()
+                if redis_bots:
+                    return redis_bots
+            except Exception as e:
+                logger.debug(f"Redis list bots failed: {e}")
 
-    def get_running_bots_count(self) -> int:
+        # 폴리백: 로컬 봇에서 조회
+        for bid in self.bots.keys():
+            status = await self.get_bot_status(bid)
+            if status:
+                statuses.append(status)
+        return statuses
+
+    async def get_running_bots_count(self) -> int:
         """실행 중인 봇 수"""
         count = 0
         for bot_id in self.bots:
-            status = self.get_bot_status(bot_id)
+            status = await self.get_bot_status(bot_id)
             if status and status.get('status') in ['running', 'idle'] and not status.get('mock_mode'):
                 count += 1
         return count
@@ -487,11 +528,11 @@ class DashboardBotManager:
                 except:
                     pass
 
-    def get_withdrawable_amount(self) -> float:
+    async def get_withdrawable_amount(self) -> float:
         """출금 가능 금액 계산"""
         total_pnl = 0.0
         for bot_id in self.bots:
-            status = self.get_bot_status(bot_id)
+            status = await self.get_bot_status(bot_id)
             if status:
                 total_pnl += status.get('pnl', 0)
 
@@ -553,7 +594,7 @@ class DashboardBotManager:
 
     async def process_withdrawal(self, exchange: str, asset: str) -> Dict:
         """출금 요청 처리"""
-        amount = self.get_withdrawable_amount()
+        amount = await self.get_withdrawable_amount()
         if amount < 50:
             return {
                 'success': False,
@@ -607,9 +648,10 @@ class DashboardBotManager:
         logger.info(f"WebSocket client connected. Total: {len(self.websocket_clients)}")
 
         # 초기 데이터 전송
+        bots_status = await self.get_all_bots_status()
         await websocket.send_json({
             'type': 'init',
-            'bots': self.get_all_bots_status(),
+            'bots': bots_status,
             'exchange_balances': self.exchange_balances,
             'system_metrics': self.system_metrics,
             'api_usage': self.api_usage
@@ -667,7 +709,7 @@ class DashboardBotManager:
                 # 자동 수리: 중지된 봇 재시작
                 restarted = []
                 for bot_id in self.bots:
-                    status = self.get_bot_status(bot_id)
+                    status = await self.get_bot_status(bot_id)
                     if status and status.get('status') == 'error':
                         if await self.start_bot(bot_id):
                             restarted.append(bot_id)
@@ -707,9 +749,9 @@ async def get_status():
     return {
         "timestamp": datetime.utcnow().isoformat(),
         "total_bots": len(bot_manager.bots),
-        "running_bots": bot_manager.get_running_bots_count(),
+        "running_bots": await bot_manager.get_running_bots_count(),
         "total_capital": bot_manager.get_total_capital(),
-        "withdrawable": bot_manager.get_withdrawable_amount(),
+        "withdrawable": await bot_manager.get_withdrawable_amount(),
         "telegram_enabled": bot_manager.telegram_enabled,
         "kill_switch": bot_manager.kill_switch_active
     }
@@ -718,13 +760,13 @@ async def get_status():
 @app.get("/api/bots")
 async def get_bots():
     """모든 봇 상태"""
-    return bot_manager.get_all_bots_status()
+    return await bot_manager.get_all_bots_status()
 
 
 @app.get("/api/bot/{bot_id}/status")
 async def get_bot_detail(bot_id: str):
     """특정 봇 상세 상태"""
-    status = bot_manager.get_bot_status(bot_id)
+    status = await bot_manager.get_bot_status(bot_id)
     if status:
         return status
     raise HTTPException(status_code=404, detail="Bot not found")
@@ -909,7 +951,7 @@ async def get_profit():
     """수익 현황"""
     bots_pnl = {}
     for bot_id in bot_manager.bots:
-        status = bot_manager.get_bot_status(bot_id)
+        status = await bot_manager.get_bot_status(bot_id)
         if status:
             bots_pnl[bot_id] = status.get('pnl', 0)
 
@@ -1002,7 +1044,7 @@ async def get_ai_analysis():
         logger.error(f"AI analysis error: {e}")
         # Fallback: 기본 분석
         for bot_id in bot_manager.bots:
-            status = bot_manager.get_bot_status(bot_id)
+            status = await bot_manager.get_bot_status(bot_id)
             if status:
                 reports.append({
                     'bot': status.get('bot_id', bot_id),
@@ -1257,7 +1299,7 @@ async def background_updates():
 
             # 봇 상태 브로드캐스트
             for bot_id in bot_manager.bots:
-                status = bot_manager.get_bot_status(bot_id)
+                status = await bot_manager.get_bot_status(bot_id)
                 if status:
                     await bot_manager.broadcast_update({
                         'type': 'bot_status',
@@ -1268,7 +1310,7 @@ async def background_updates():
                     })
 
             # 출금 가능 금액 확인
-            withdrawable = bot_manager.get_withdrawable_amount()
+            withdrawable = await bot_manager.get_withdrawable_amount()
             if withdrawable >= 50 and bot_manager.telegram_enabled:
                 await bot_manager.send_telegram_notification(
                     f"💰 출금 가능 금액: ${withdrawable:.2f}\n출금하시겠습니까?"
@@ -1761,7 +1803,7 @@ async def get_department_7_status():
     """제7부서: 전략실행팀 상태"""
     bot_statuses = []
     for bot_id, bot_data in bot_manager.bots.items():
-        status = bot_manager.get_bot_status(bot_id)
+        status = await bot_manager.get_bot_status(bot_id)
         if status:
             bot_statuses.append({
                 "bot_id": bot_id,

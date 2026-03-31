@@ -22,6 +22,7 @@ sys.path.insert(0, str(project_root))
 
 from lib.core.logger import get_logger, setup_logging
 from lib.messaging.event_bus import get_event_bus
+from lib.cache.redis_client import get_redis_cache
 
 # 봇 임포트
 from grid_bot import BinanceGridBot
@@ -233,6 +234,67 @@ async def start_bot(config: dict) -> bool:
         return False
 
 
+async def update_bot_status_to_redis():
+    """봇 상태를 Redis에 주기적 저장"""
+    redis_cache = get_redis_cache()
+    try:
+        await redis_cache.connect()
+        logger.info("Redis connected for bot status updates")
+    except Exception as e:
+        logger.warning(f"Redis connection failed: {e}")
+        return
+
+    while True:
+        try:
+            for bot_id, bot in bots.items():
+                try:
+                    if hasattr(bot, 'get_status'):
+                        status = bot.get_status()
+                        # 봇 타입 결정
+                        bot_type = 'stable'
+                        if bot_id in ['hyperliquid_mm_001', 'pump_sniper_001', 'gmgn_copy_001']:
+                            bot_type = 'dopamine'
+
+                        # 거래소 결정
+                        exchange = 'Unknown'
+                        if 'binance' in bot_id:
+                            exchange = 'Binance'
+                        elif 'bybit' in bot_id:
+                            exchange = 'Bybit'
+                        elif 'hyperliquid' in bot_id:
+                            exchange = 'Hyperliquid'
+                        elif 'polymarket' in bot_id:
+                            exchange = 'Polymarket'
+                        elif 'pump' in bot_id or 'gmgn' in bot_id:
+                            exchange = 'Solana'
+                        elif 'ibkr' in bot_id:
+                            exchange = 'IBKR'
+
+                        await redis_cache.set_bot_status(
+                            bot_id=bot_id,
+                            status=status.get('status', 'unknown'),
+                            bot_type=bot_type,
+                            capital=status.get('capital', status.get('capital_sol', 0)),
+                            pnl=status.get('total_pnl', status.get('total_pnl_sol', 0)),
+                            trades=status.get('total_trades', status.get('total_bets', 0)),
+                            mock_mode=status.get('mock_mode', False),
+                            exchange=exchange,
+                            symbol=status.get('symbol', 'Multi'),
+                            ttl_seconds=60
+                        )
+                except Exception as e:
+                    logger.debug(f"Failed to update status for {bot_id}: {e}")
+
+            await asyncio.sleep(5)  # 5초마다 업데이트
+        except asyncio.CancelledError:
+            break
+        except Exception as e:
+            logger.error(f"Status update loop error: {e}")
+            await asyncio.sleep(10)
+
+    await redis_cache.disconnect()
+
+
 async def stop_all_bots():
     """모든 봇 중지"""
     logger.info("🛑 Stopping all bots...")
@@ -310,6 +372,10 @@ async def run_all():
 
     # 상태 출력
     running = await print_status()
+
+    # Redis 상태 업데이트 태스크 시작
+    redis_task = asyncio.create_task(update_bot_status_to_redis())
+    logger.info("Redis status update task started")
 
     # Dashboard URL
     print(f"\n🌐 CEO 대시보드: http://100.77.207.113:8080")
