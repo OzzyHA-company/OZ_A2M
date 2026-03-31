@@ -443,19 +443,34 @@ class TriangularArbBot:
             return 0
 
     async def _execute_arbitrage(self, opportunity: ArbOpportunity):
-        """아비트라지 실행 (잔액 기반 주문 사이즈 조정)"""
+        """아비트라지 실행 (잔액 기반 주문 사이즈 자동 조정)"""
         try:
-            # 실제 사용 가능한 잔액 확인
-            available_usdt = await self._get_available_balance_usdt()
+            # 실제 사용 가능한 USDT 잔액만 확인 (SOL은 삼각아비트라지에 사용 불가)
+            balance = await self.exchange.fetch_balance()
+            usdt_free = balance.get('USDT', {}).get('free', 0)
+            sol_free = balance.get('SOL', {}).get('free', 0)
 
-            # 사용할 자본 결정 (설정 자본 vs 실제 잔액 중 작은 값)
-            trade_capital = min(self.capital, available_usdt * 0.95)  # 5% 여유 두고 주문
+            # SOL 가치도 로깅용으로 계산
+            sol_value_usdt = 0
+            if sol_free > 0:
+                try:
+                    ticker = await self.exchange.fetch_ticker('SOL/USDT')
+                    sol_price = ticker.get('bid', 150.0)
+                    sol_value_usdt = sol_free * sol_price
+                except:
+                    sol_value_usdt = sol_free * 150.0
+
+            total_value = usdt_free + sol_value_usdt
+            logger.info(f"Balance check: USDT=${usdt_free:.2f}, SOL=${sol_value_usdt:.2f} (total=${total_value:.2f})")
+
+            # 사용할 자본 결정 (USDT만 사용 가능)
+            trade_capital = min(self.capital, usdt_free * 0.95)  # 5% 여유 두고 주문
 
             if trade_capital < self.MIN_NOTIONAL_USDT * self.SAFETY_MARGIN:
-                logger.warning(f"Insufficient balance for arbitrage: ${trade_capital:.2f} (min: ${self.MIN_NOTIONAL_USDT * self.SAFETY_MARGIN:.2f})")
+                logger.warning(f"Insufficient USDT for arbitrage: ${trade_capital:.2f} (min: ${self.MIN_NOTIONAL_USDT * self.SAFETY_MARGIN:.2f})")
                 return
 
-            logger.info(f"Executing arbitrage with capital: ${trade_capital:.2f} (available: ${available_usdt:.2f})")
+            logger.info(f"Executing arbitrage with capital: ${trade_capital:.2f} (USDT available: ${usdt_free:.2f})")
 
             # 첫 번째 거래
             symbol1 = self.symbols[0]
