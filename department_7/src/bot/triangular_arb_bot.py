@@ -337,33 +337,72 @@ class TriangularArbBot:
             logger.error(f"Failed to update tickers: {e}")
 
     def _analyze_arbitrage(self) -> Optional[ArbOpportunity]:
-        """아비트라지 기회 분석"""
+        """아비트라지 기회 분석 (정확한 수익률 계산)"""
         try:
-            # 각 단계의 가격 확인
-            prices = []
-            for symbol in self.symbols:
-                if symbol not in self.tickers:
+            # 각 단계의 티커 확인
+            if not all(s in self.tickers for s in self.symbols):
+                return None
+
+            # USDT 기준 삼각아비트라지 경로:
+            # USDT -> BTC (buy BTC/USDT @ ask)
+            # BTC -> ETH (buy ETH/BTC @ ask - BTC로 ETH 매수)
+            # ETH -> USDT (sell ETH/USDT @ bid - ETH를 USDT로 매도)
+            #
+            # 또는
+            # USDT -> BTC @ ask1
+            # BTC -> ETH @ ask2 (ETH/BTC)
+            # ETH -> USDT @ bid3 (ETH/USDT)
+
+            symbol1, symbol2, symbol3 = self.symbols[0], self.symbols[1], self.symbols[2]
+
+            # 가격 추출
+            try:
+                # 1단계: USDT -> 첫 번째 코인 (매수 @ ask)
+                if "/USDT" in symbol1:
+                    # BTC/USDT: USDT로 BTC 삼
+                    price1 = self.tickers[symbol1]["ask"]  # BTC 1개 가격 in USDT
+                    start_usdt = 100  # 가정: 100 USDT 시작
+                    coin1_amount = start_usdt / price1  # 산 BTC 수량
+                else:
                     return None
-                prices.append(self.tickers[symbol]["ask"])  # 매수가
 
-            # 이론적 수익률 계산
-            # BTC -> ETH -> BNB -> BTC
-            # start: 1 BTC
-            # step1: 1 * (ETH/BTC) = X ETH
-            # step2: X * (BNB/ETH) = Y BNB
-            # step3: Y * (BTC/BNB) = Z BTC
-            # profit = (Z - 1) / 1
+                # 2단계: 첫 번째 코인 -> 두 번째 코인
+                if "/BTC" in symbol2:
+                    # ETH/BTC: BTC로 ETH 삼
+                    price2 = self.tickers[symbol2]["ask"]  # ETH 1개 가격 in BTC
+                    coin2_amount = coin1_amount / price2  # 산 ETH 수량
+                elif "/ETH" in symbol2:
+                    price2 = self.tickers[symbol2]["ask"]
+                    coin2_amount = coin1_amount / price2
+                else:
+                    return None
 
-            amount = 1.0
-            for price in prices:
-                amount = amount * price
+                # 3단계: 두 번째 코인 -> USDT (매도 @ bid)
+                if "/USDT" in symbol3:
+                    # ETH/USDT: ETH를 USDT로 팜
+                    price3 = self.tickers[symbol3]["bid"]  # ETH 1개 가격 in USDT
+                    final_usdt = coin2_amount * price3
+                else:
+                    return None
 
-            profit_pct = (amount - 1) / 1
+                # 수익률 계산
+                profit = final_usdt - start_usdt
+                profit_pct = profit / start_usdt
 
-            # 수수료 차감
+            except (KeyError, ZeroDivisionError) as e:
+                logger.debug(f"Price calculation error: {e}")
+                return None
+
+            # 수수료 차감 (3번 거래)
             net_profit_pct = profit_pct - self.total_fee_pct
 
-            if net_profit_pct > 0:
+            # 디버그 로깅 (과도한 수익률 경고)
+            if net_profit_pct > 0.1:  # 10% 이상은 의심
+                logger.warning(f"Suspicious arbitrage profit detected: {net_profit_pct:.2%}. Skipping.")
+                return None
+
+            if net_profit_pct > self.min_profit_pct:
+                logger.info(f"Valid arbitrage opportunity: {net_profit_pct:.4%} (gross: {profit_pct:.4%})")
                 return ArbOpportunity(
                     path=self.full_path,
                     symbols=self.symbols,
@@ -442,8 +481,89 @@ class TriangularArbBot:
             logger.error(f"Failed to fetch balance: {e}")
             return 0
 
+    async def _withdraw_profit(self, profit_usdt: float, trade_id: str):
+        """수익금 즉시 출금
+
+        원금은 그대로 유지, 수익분만 출금
+        출금처: Binance -> MetaMask (Polygon) USDC
+        """
+        if profit_usdt <= 0:
+            return
+
+        try:
+            # 출금 정보 설정
+            withdraw_address = os.environ.get("METAMASK_PROFIT_WALLET", "0x567C027e81469225A070656ebca7227C1F6cf95d")
+            withdraw_network = "MATIC"  # Polygon 메인넷
+
+            logger.info(f"Initiating profit withdrawal: ${profit_usdt:.2f} USDT to {withdraw_address}")
+
+            # Binance 출금 실행 (USDT -> Polygon USDC)
+            try:
+                withdraw_result = await self.exchange.withdraw(
+                    code="USDT",
+                    amount=profit_usdt,
+                    address=withdraw_address,
+                    tag=None,
+                    params={
+                        "network": withdraw_network,
+                        "addressTag": None
+                    }
+                )
+
+                withdraw_id = withdraw_result.get('id', 'N/A')
+                logger.info(f"Profit withdrawal submitted: ID={withdraw_id}, Amount=${profit_usdt:.2f}")
+
+                # 출금 성공 알림
+                await self._send_telegram_notification(
+                    f"💰 수익 즉시 출금 완료\n"
+                    f"거래 ID: {trade_id}\n"
+                    f"출금액: ${profit_usdt:.2f} USDT\n"
+                    f"출금처: MetaMask (Polygon)\n"
+                    f"주소: {withdraw_address[:10]}...{withdraw_address[-6:]}\n"
+                    f"출금 ID: {withdraw_id}\n"
+                    f"원금 유지: ${self.capital:.2f}"
+                )
+
+                # EventBus로 대시보드에 출금 이벤트 발행
+                if self.event_bus:
+                    await self.event_bus.publish("profit_withdrawal", {
+                        "bot_id": self.bot_id,
+                        "trade_id": trade_id,
+                        "amount": profit_usdt,
+                        "currency": "USDT",
+                        "to_address": withdraw_address,
+                        "network": "Polygon",
+                        "withdraw_id": withdraw_id,
+                        "timestamp": datetime.utcnow().isoformat(),
+                        "type": "immediate_profit_withdrawal"
+                    })
+
+                return True
+
+            except ccxt.NotSupported as e:
+                # 출금 API가 지원되지 않는 경우 (테스트넷 등)
+                logger.warning(f"Withdrawal not supported (testnet?): {e}")
+                await self._send_telegram_notification(
+                    f"⚠️ 수익 출금 대기 (API 제한)\n"
+                    f"거래 ID: {trade_id}\n"
+                    f"출금 예정액: ${profit_usdt:.2f} USDT\n"
+                    f"출금처: MetaMask (Polygon)\n"
+                    f"수동 출금 필요"
+                )
+                return False
+
+        except Exception as e:
+            logger.error(f"Profit withdrawal failed: {e}")
+            await self._send_telegram_notification(
+                f"🔴 수익 출금 실패\n"
+                f"거래 ID: {trade_id}\n"
+                f"출금 시도액: ${profit_usdt:.2f}\n"
+                f"오류: {str(e)[:100]}"
+            )
+            return False
+
     async def _execute_arbitrage(self, opportunity: ArbOpportunity):
-        """아비트라지 실행 (잔액 기반 주문 사이즈 자동 조정)"""
+        """아비트라지 실행 (잔액 기반 주문 사이즈 자동 조정 + 수익 즉시 출금)"""
         try:
             # 실제 사용 가능한 USDT 잔액만 확인 (SOL은 삼각아비트라지에 사용 불가)
             balance = await self.exchange.fetch_balance()
@@ -463,42 +583,45 @@ class TriangularArbBot:
             total_value = usdt_free + sol_value_usdt
             logger.info(f"Balance check: USDT=${usdt_free:.2f}, SOL=${sol_value_usdt:.2f} (total=${total_value:.2f})")
 
-            # 사용할 자본 결정 (USDT만 사용 가능)
-            trade_capital = min(self.capital, usdt_free * 0.95)  # 5% 여유 두고 주문
+            # 사용할 자본 결정 (USDT만 사용 가능, 설정 자본과 실제 잔액 중 작은 값)
+            max_trade_capital = min(self.capital, usdt_free * 0.95)  # 5% 여유 두고 주문
 
-            if trade_capital < self.MIN_NOTIONAL_USDT * self.SAFETY_MARGIN:
-                logger.warning(f"Insufficient USDT for arbitrage: ${trade_capital:.2f} (min: ${self.MIN_NOTIONAL_USDT * self.SAFETY_MARGIN:.2f})")
+            # 최소 주문 금액 검증
+            if max_trade_capital < self.MIN_NOTIONAL_USDT * self.SAFETY_MARGIN:
+                logger.warning(f"Insufficient USDT for arbitrage: ${max_trade_capital:.2f} (min: ${self.MIN_NOTIONAL_USDT * self.SAFETY_MARGIN:.2f})")
                 return
 
-            logger.info(f"Executing arbitrage with capital: ${trade_capital:.2f} (USDT available: ${usdt_free:.2f})")
+            # 실제 사용할 자본 (원금 한도 내에서)
+            trade_capital = min(max_trade_capital, self.capital)
+            logger.info(f"Executing arbitrage with capital: ${trade_capital:.2f} (USDT available: ${usdt_free:.2f}, Max allowed: ${self.capital:.2f})")
 
             # 첫 번째 거래
             symbol1 = self.symbols[0]
             amount1 = self._amount_to_precision(symbol1, trade_capital / self.tickers[symbol1]["ask"])
             order1 = await self.exchange.create_market_buy_order(symbol1, amount1)
-            logger.info(f"Step 1: Bought {amount1} {symbol1.split('/')[1]} @ {self.tickers[symbol1]['ask']}")
+            logger.info(f"Step 1: Bought {amount1} {symbol1.split('/')[0]} @ {self.tickers[symbol1]['ask']}")
 
             # 두 번째 거래
             symbol2 = self.symbols[1]
             amount2 = self._amount_to_precision(symbol2, amount1 / self.tickers[symbol2]["ask"])
             order2 = await self.exchange.create_market_buy_order(symbol2, amount2)
-            logger.info(f"Step 2: Bought {amount2} {symbol2.split('/')[1]} @ {self.tickers[symbol2]['ask']}")
+            logger.info(f"Step 2: Bought {amount2} {symbol2.split('/')[0]} @ {self.tickers[symbol2]['ask']}")
 
             # 세 번째 거래
             symbol3 = self.symbols[2]
             amount3 = self._amount_to_precision(symbol3, amount2 / self.tickers[symbol3]["ask"])
             order3 = await self.exchange.create_market_buy_order(symbol3, amount3)
-            logger.info(f"Step 3: Bought {amount3} {symbol3.split('/')[1]} @ {self.tickers[symbol3]['ask']}")
+            logger.info(f"Step 3: Bought {amount3} {symbol3.split('/')[0]} @ {self.tickers[symbol3]['ask']}")
 
-            # 수익 계산
-            final_btc = amount3
-            initial_btc = trade_capital / self.tickers[symbol1]["ask"]
-            profit = final_btc - initial_btc
-            profit_pct = profit / initial_btc if initial_btc > 0 else 0
+            # 수익 계산 (USDT 기준)
+            final_usdt_value = amount3 * self.tickers[symbol3]["bid"]
+            profit = final_usdt_value - trade_capital
+            profit_pct = profit / trade_capital if trade_capital > 0 else 0
 
             # 거래 기록
+            trade_id = f"arb_{datetime.utcnow().timestamp()}"
             trade = ArbTrade(
-                id=f"arb_{datetime.utcnow().timestamp()}",
+                id=trade_id,
                 path=" -> ".join(opportunity.path),
                 profit_pct=profit_pct,
                 profit_amount=profit,
@@ -518,10 +641,16 @@ class TriangularArbBot:
             await self._send_telegram_notification(
                 f"{emoji} 아비트라지 실행 완료\n"
                 f"경로: {' -> '.join(opportunity.path)}\n"
-                f"예상 수익: {opportunity.profit_pct:.4%}\n"
-                f"실제 수익: {profit_pct:.4%}\n"
+                f"투입 자본: ${trade_capital:.2f}\n"
+                f"최종 가치: ${final_usdt_value:.2f}\n"
+                f"수익률: {profit_pct:.4%}\n"
                 f"수익금: ${profit:.2f}"
             )
+
+            # 수익 즉시 출금 (원금 유지, 수익분만 출금)
+            if profit > 0:
+                logger.info(f"Initiating immediate profit withdrawal: ${profit:.2f}")
+                await self._withdraw_profit(profit, trade_id)
 
             if self.on_trade:
                 self.on_trade(trade)

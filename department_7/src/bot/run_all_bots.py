@@ -84,7 +84,7 @@ BOT_CONFIGS = [
         'kwargs': {
             'bot_id': 'triarb_binance_001',
             'exchange_id': 'binance',
-            'capital': 20.0,  # 최소 $11 필요, 여유있게 $20
+            'capital': 6.0,  # 현재 USDT 잔액 $7.44 기준 (SOL+USDT 합산 사용)
             'min_profit_pct': 0.001,
             'sandbox': False,
             'telegram_alerts': True
