@@ -162,6 +162,13 @@ class BybitScalpingBot:
         self.winning_trades: int = 0
         self.daily_trades: int = 0
 
+        # 시간 추적
+        self.start_time: datetime = datetime.utcnow()
+        self.last_trade_time: Optional[datetime] = None
+        self.last_signal_time: Optional[datetime] = None
+        self.trades_today: int = 0
+        self.last_trade_date: Optional[str] = None
+
         # 콜백
         self.on_trade: Optional[Callable[[Trade], None]] = None
         self.on_position_change: Optional[Callable[[Optional[Position]], None]] = None
@@ -390,6 +397,8 @@ class BybitScalpingBot:
             logger.info(f"Signal ignored due to low confidence: {confidence}")
             return
 
+        # 신호 시간 기록
+        self.last_signal_time = datetime.utcnow()
         logger.info(f"Processing signal: {action} {symbol} @ {signal.get('price')}")
 
         if action == "buy":
@@ -429,17 +438,20 @@ class BybitScalpingBot:
                 entry_time=datetime.utcnow()
             )
 
+            trade_time = datetime.utcnow()
             trade = Trade(
                 id=order["id"],
                 symbol=self.symbol,
                 side="buy",
                 amount=amount,
                 price=price,
-                timestamp=datetime.utcnow()
+                timestamp=trade_time
             )
             self.trades.append(trade)
             self.total_trades += 1
             self.daily_trades += 1
+            self.last_trade_time = trade_time
+            self._update_trades_today()
 
             logger.info(f"Opened LONG position: {amount} {self.symbol} @ {price}")
 
@@ -489,18 +501,21 @@ class BybitScalpingBot:
                 exit_price = order["price"] or order["average"]
                 pnl = (exit_price - self.position.entry_price) * self.position.amount
 
+                trade_time = datetime.utcnow()
                 trade = Trade(
                     id=order["id"],
                     symbol=self.symbol,
                     side="sell",
                     amount=self.position.amount,
                     price=exit_price,
-                    timestamp=datetime.utcnow(),
+                    timestamp=trade_time,
                     pnl=pnl
                 )
                 self.trades.append(trade)
                 self.total_trades += 1
                 self.daily_trades += 1
+                self.last_trade_time = trade_time
+                self._update_trades_today()
 
                 if pnl > 0:
                     self.winning_trades += 1
@@ -661,6 +676,15 @@ class BybitScalpingBot:
         # 자정에 리셋 (간단한 구현)
         pass
 
+    def _update_trades_today(self):
+        """오늘 거래 횟수 업데이트"""
+        today = datetime.utcnow().strftime('%Y-%m-%d')
+        if self.last_trade_date != today:
+            self.last_trade_date = today
+            self.trades_today = 1
+        else:
+            self.trades_today += 1
+
     def get_status(self) -> Dict:
         """봇 상태 반환"""
         win_rate = (self.winning_trades / self.total_trades * 100) if self.total_trades > 0 else 0
@@ -679,6 +703,17 @@ class BybitScalpingBot:
             "total_trades": self.total_trades,
             "winning_trades": self.winning_trades,
             "win_rate": win_rate,
+            # 대시보드용 추가 필드
+            "start_time": self.start_time.isoformat(),
+            "last_trade_time": self.last_trade_time.isoformat() if self.last_trade_time else None,
+            "last_signal_time": self.last_signal_time.isoformat() if self.last_signal_time else None,
+            "next_trade_time": None,  # 스캘핑은 신호 기반이므로 예정 시간 없음
+            "trades_today": self.trades_today,
+            "extra": {
+                "stop_loss_pct": self.stop_loss_pct,
+                "take_profit_pct": self.take_profit_pct,
+                "max_daily_loss": self.max_daily_loss,
+            },
             "timestamp": datetime.utcnow().isoformat()
         }
 

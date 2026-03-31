@@ -149,6 +149,13 @@ class BinanceDCABot:
         self.total_pnl: float = 0.0
         self.dca_executions: int = 0  # DCA 실행 횟수
 
+        # 시간 추적
+        self.start_time: datetime = datetime.utcnow()
+        self.last_trade_time: Optional[datetime] = None
+        self.next_dca_price: Optional[float] = None  # 다음 DCA 예상 가격
+        self.trades_today: int = 0
+        self.last_trade_date: Optional[str] = None
+
         # 콜백
         self.on_trade: Optional[Callable[[DCATrade], None]] = None
         self.on_position_change: Optional[Callable[[Optional[DCAPosition]], None]] = None
@@ -402,16 +409,22 @@ class BinanceDCABot:
             self.peak_price = price
 
             # 거래 기록
+            trade_time = datetime.utcnow()
             trade = DCATrade(
                 id=order["id"],
                 side="buy",
                 amount=amount,
                 price=price,
-                timestamp=datetime.utcnow(),
+                timestamp=trade_time,
                 dca_count=1
             )
             self.trades.append(trade)
             self.total_trades += 1
+            self.last_trade_time = trade_time
+            self._update_trades_today()
+
+            # 다음 DCA 가격 계산 (현재가 기준 -2%)
+            self.next_dca_price = price * (1 - self.dca_drop_pct)
 
             logger.info(f"Initial buy: {amount} BTC @ ${price:.2f} (notional: ${amount * price:.2f})")
 
@@ -478,16 +491,22 @@ class BinanceDCABot:
             self.dca_executions += 1
 
             # 거래 기록
+            trade_time = datetime.utcnow()
             trade = DCATrade(
                 id=order["id"],
                 side="buy",
                 amount=amount,
                 price=price,
-                timestamp=datetime.utcnow(),
+                timestamp=trade_time,
                 dca_count=self.position.dca_count
             )
             self.trades.append(trade)
             self.total_trades += 1
+            self.last_trade_time = trade_time
+            self._update_trades_today()
+
+            # 다음 DCA 가격 계산
+            self.next_dca_price = price * (1 - self.dca_drop_pct)
 
             logger.info(f"DCA #{self.position.dca_count}: +{amount} BTC @ ${price:.2f}")
             logger.info(f"New average price: ${self.position.entry_price:.2f}")
@@ -536,12 +555,13 @@ class BinanceDCABot:
             pnl_pct = (exit_price / self.position.entry_price - 1) * 100
 
             # 거래 기록
+            trade_time = datetime.utcnow()
             trade = DCATrade(
                 id=order["id"],
                 side="sell",
                 amount=self.position.amount,
                 price=exit_price,
-                timestamp=datetime.utcnow(),
+                timestamp=trade_time,
                 dca_count=self.position.dca_count,
                 pnl=pnl
             )
@@ -549,6 +569,9 @@ class BinanceDCABot:
             self.total_trades += 1
             self.winning_trades += 1
             self.total_pnl += pnl
+            self.last_trade_time = trade_time
+            self._update_trades_today()
+            self.next_dca_price = None  # 포지션 종료 시 초기화
 
             logger.info(f"Take profit: Sold {self.position.amount} BTC @ ${exit_price:.2f}")
             logger.info(f"PnL: ${pnl:.2f} ({pnl_pct:.2f}%)")
@@ -638,6 +661,15 @@ class BinanceDCABot:
             f"총 PnL: ${self.total_pnl:.2f}"
         )
 
+    def _update_trades_today(self):
+        """오늘 거래 횟수 업데이트"""
+        today = datetime.utcnow().strftime('%Y-%m-%d')
+        if self.last_trade_date != today:
+            self.last_trade_date = today
+            self.trades_today = 1
+        else:
+            self.trades_today += 1
+
     def get_status(self) -> Dict[str, Any]:
         """봇 상태 반환"""
         win_rate = (self.winning_trades / self.total_trades * 100) if self.total_trades > 0 else 0
@@ -666,6 +698,16 @@ class BinanceDCABot:
             "win_rate": win_rate,
             "total_pnl": self.total_pnl,
             "dca_executions": self.dca_executions,
+            # 대시보드용 추가 필드
+            "start_time": self.start_time.isoformat(),
+            "last_trade_time": self.last_trade_time.isoformat() if self.last_trade_time else None,
+            "next_trade_time": None,  # DCA는 가격 기반이므로 예정 시간 없음
+            "trades_today": self.trades_today,
+            "extra": {
+                "next_dca_price": self.next_dca_price,
+                "dca_count": self.position.dca_count if self.position else 0,
+                "avg_entry_price": self.position.entry_price if self.position else 0,
+            } if self.position else {},
             "timestamp": datetime.utcnow().isoformat()
         }
 

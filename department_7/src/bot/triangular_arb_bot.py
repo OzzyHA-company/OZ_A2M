@@ -146,6 +146,13 @@ class TriangularArbBot:
         self.executed_trades: int = 0
         self.total_profit: float = 0.0
 
+        # 시간 추적
+        self.start_time: datetime = datetime.utcnow()
+        self.last_trade_time: Optional[datetime] = None
+        self.last_check_time: Optional[datetime] = None
+        self.trades_today: int = 0
+        self.last_trade_date: Optional[str] = None
+
         # 콜백
         self.on_opportunity: Optional[Callable[[ArbOpportunity], None]] = None
         self.on_trade: Optional[Callable[[ArbTrade], None]] = None
@@ -294,6 +301,7 @@ class TriangularArbBot:
                     await self._update_tickers()
 
                     # 아비트라지 기회 분석
+                    self.last_check_time = datetime.utcnow()
                     opportunity = self._analyze_arbitrage()
 
                     if opportunity and opportunity.profit_pct > self.min_profit_pct:
@@ -620,18 +628,21 @@ class TriangularArbBot:
             profit_pct = profit / trade_capital if trade_capital > 0 else 0
 
             # 거래 기록
-            trade_id = f"arb_{datetime.utcnow().timestamp()}"
+            trade_time = datetime.utcnow()
+            trade_id = f"arb_{trade_time.timestamp()}"
             trade = ArbTrade(
                 id=trade_id,
                 path=" -> ".join(opportunity.path),
                 profit_pct=profit_pct,
                 profit_amount=profit,
-                timestamp=datetime.utcnow(),
+                timestamp=trade_time,
                 fees=self.total_fee_pct * trade_capital
             )
             self.trades.append(trade)
             self.executed_trades += 1
             self.total_profit += profit
+            self.last_trade_time = trade_time
+            self._update_trades_today()
 
             logger.info(
                 f"Arbitrage executed: profit = {profit_pct:.4%} (${profit:.2f})"
@@ -712,6 +723,15 @@ class TriangularArbBot:
             f"총 수익: ${self.total_profit:.2f}"
         )
 
+    def _update_trades_today(self):
+        """오늘 거래 횟수 업데이트"""
+        today = datetime.utcnow().strftime('%Y-%m-%d')
+        if self.last_trade_date != today:
+            self.last_trade_date = today
+            self.trades_today = 1
+        else:
+            self.trades_today += 1
+
     def get_status(self) -> Dict[str, Any]:
         """봇 상태 반환"""
         return {
@@ -726,6 +746,16 @@ class TriangularArbBot:
             "opportunities_found": self.opportunities_found,
             "executed_trades": self.executed_trades,
             "total_profit": self.total_profit,
+            # 대시보드용 추가 필드
+            "start_time": self.start_time.isoformat(),
+            "last_trade_time": self.last_trade_time.isoformat() if self.last_trade_time else None,
+            "last_check_time": self.last_check_time.isoformat() if self.last_check_time else None,
+            "next_trade_time": None,  # 아비트라지는 기회 발견 기반
+            "trades_today": self.trades_today,
+            "extra": {
+                "symbols": self.symbols,
+                "total_fee_pct": self.total_fee_pct,
+            },
             "timestamp": datetime.utcnow().isoformat()
         }
 

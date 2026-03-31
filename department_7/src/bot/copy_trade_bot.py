@@ -121,6 +121,13 @@ class GMGNCopyBot:
         self.successful_copies: int = 0
         self.total_pnl_sol: float = 0.0
 
+        # 시간 추적
+        self.start_time: datetime = datetime.utcnow()
+        self.last_trade_time: Optional[datetime] = None
+        self.last_copy_time: Optional[datetime] = None
+        self.trades_today: int = 0
+        self.last_trade_date: Optional[str] = None
+
         # 콜백
         self.on_copy: Optional[Callable[[CopyTrade], None]] = None
         self.on_trade: Optional[Callable[[CopyTrade], None]] = None
@@ -299,18 +306,22 @@ class GMGNCopyBot:
 
             # 거래 실행
             self.total_copies += 1
+            copy_time = datetime.utcnow()
 
             trade = CopyTrade(
-                id=f"copy_{datetime.utcnow().timestamp()}",
+                id=f"copy_{copy_time.timestamp()}",
                 original_wallet=wallet.address,
                 token_address=token,
                 token_symbol=token,
                 side=side,
                 amount=final_amount,
                 price=transaction.get("price", 0),
-                timestamp=datetime.utcnow()
+                timestamp=copy_time
             )
             self.trades.append(trade)
+            self.last_copy_time = copy_time
+            self.last_trade_time = copy_time
+            self._update_trades_today()
 
             # 포지션 업데이트
             token_addr = transaction.get("token_address", token)
@@ -446,6 +457,15 @@ class GMGNCopyBot:
             f"추적 지갑: {len(self.tracked_wallets)}개"
         )
 
+    def _update_trades_today(self):
+        """오늘 거래 횟수 업데이트"""
+        today = datetime.utcnow().strftime('%Y-%m-%d')
+        if self.last_trade_date != today:
+            self.last_trade_date = today
+            self.trades_today = 1
+        else:
+            self.trades_today += 1
+
     def get_status(self) -> Dict[str, Any]:
         """봇 상태 반환"""
         win_rate = (self.successful_copies / self.total_copies * 100) if self.total_copies > 0 else 0
@@ -462,6 +482,17 @@ class GMGNCopyBot:
             "win_rate": win_rate,
             "total_pnl_sol": self.total_pnl_sol,
             "active_positions": len(self.active_positions),
+            # 대시보드용 추가 필드
+            "start_time": self.start_time.isoformat(),
+            "last_trade_time": self.last_trade_time.isoformat() if self.last_trade_time else None,
+            "last_copy_time": self.last_copy_time.isoformat() if self.last_copy_time else None,
+            "next_trade_time": None,  # 카피봇은 원본 거래 감시 기반
+            "trades_today": self.trades_today,
+            "extra": {
+                "copy_percentage": self.copy_percentage,
+                "max_position_pct": self.max_position_pct,
+                "tracked_wallet_count": len(self.tracked_wallets),
+            },
             "timestamp": datetime.utcnow().isoformat()
         }
 

@@ -133,6 +133,13 @@ class PumpSniperBot:
         self.successful_snipes: int = 0
         self.total_pnl_sol: float = 0.0
 
+        # 시간 추적
+        self.start_time: datetime = datetime.utcnow()
+        self.last_scan_time: Optional[datetime] = None
+        self.last_trade_time: Optional[datetime] = None
+        self.trades_today: int = 0
+        self.last_trade_date: Optional[str] = None
+
         # 콜백
         self.on_snipe: Optional[Callable[[TokenSnipe], None]] = None
         self.on_trade: Optional[Callable[[SnipeTrade], None]] = None
@@ -260,6 +267,9 @@ class PumpSniperBot:
 
             while self.status == SniperStatus.RUNNING:
                 try:
+                    # 스캔 시간 기록
+                    self.last_scan_time = datetime.utcnow()
+
                     # WebSocket 메시지 수신
                     message = await asyncio.wait_for(
                         self.solana_ws.recv(),
@@ -368,16 +378,19 @@ class PumpSniperBot:
             self.active_snipes[address] = snipe
 
             # 거래 기록
+            trade_time = datetime.utcnow()
             trade = SnipeTrade(
-                id=f"snipe_{datetime.utcnow().timestamp()}",
+                id=f"snipe_{trade_time.timestamp()}",
                 token_address=address,
                 token_symbol=symbol,
                 side="buy",
                 amount=amount,
                 price=buy_price,
-                timestamp=datetime.utcnow()
+                timestamp=trade_time
             )
             self.trades.append(trade)
+            self.last_trade_time = trade_time
+            self._update_trades_today()
 
             logger.info(f"Sniped: {symbol} with {amount} SOL")
 
@@ -440,18 +453,21 @@ class PumpSniperBot:
             pnl_sol = snipe.amount * pnl_pct
 
             # 거래 기록
+            trade_time = datetime.utcnow()
             trade = SnipeTrade(
-                id=f"sell_{datetime.utcnow().timestamp()}",
+                id=f"sell_{trade_time.timestamp()}",
                 token_address=address,
                 token_symbol=snipe.symbol,
                 side="sell",
                 amount=snipe.amount,
                 price=snipe.current_price,
-                timestamp=datetime.utcnow(),
+                timestamp=trade_time,
                 pnl=pnl_sol,
                 pnl_pct=pnl_pct
             )
             self.trades.append(trade)
+            self.last_trade_time = trade_time
+            self._update_trades_today()
 
             snipe.status = "sold"
             self.total_pnl_sol += pnl_sol
@@ -581,6 +597,15 @@ class PumpSniperBot:
             f"총 손익: {self.total_pnl_sol:+.3f} SOL"
         )
 
+    def _update_trades_today(self):
+        """오늘 거래 횟수 업데이트"""
+        today = datetime.utcnow().strftime('%Y-%m-%d')
+        if self.last_trade_date != today:
+            self.last_trade_date = today
+            self.trades_today = 1
+        else:
+            self.trades_today += 1
+
     def get_status(self) -> Dict[str, Any]:
         """봇 상태 반환"""
         win_rate = (self.successful_snipes / self.tokens_sniped * 100) if self.tokens_sniped > 0 else 0
@@ -597,6 +622,17 @@ class PumpSniperBot:
             "win_rate": win_rate,
             "total_pnl_sol": self.total_pnl_sol,
             "active_positions": len(self.active_snipes),
+            # 대시보드용 추가 필드
+            "start_time": self.start_time.isoformat(),
+            "last_trade_time": self.last_trade_time.isoformat() if self.last_trade_time else None,
+            "last_scan_time": self.last_scan_time.isoformat() if self.last_scan_time else None,
+            "next_trade_time": None,  # 스나이퍼는 실시간 스캔 기반
+            "trades_today": self.trades_today,
+            "extra": {
+                "take_profit_low": self.take_profit_low,
+                "take_profit_high": self.take_profit_high,
+                "stop_loss": self.stop_loss,
+            },
             "timestamp": datetime.utcnow().isoformat()
         }
 

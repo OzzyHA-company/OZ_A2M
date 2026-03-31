@@ -328,6 +328,11 @@ class DashboardBotManager:
                         'pnl': redis_status.get('pnl', 0),
                         'trades': redis_status.get('trades', 0),
                         'win_rate': 0,
+                        # 대시보드용 추가 필드
+                        'start_time': redis_status.get('start_time'),
+                        'last_trade_time': redis_status.get('last_trade_time'),
+                        'trades_today': redis_status.get('trades_today', 0),
+                        'extra': redis_status.get('extra', {}),
                     }
             except Exception as e:
                 logger.debug(f"Redis status read failed for {bot_id}: {e}")
@@ -354,6 +359,17 @@ class DashboardBotManager:
                 'pnl': status.get('total_pnl', status.get('total_pnl_sol', 0)),
                 'trades': status.get('total_trades', status.get('total_bets', 0)),
                 'win_rate': status.get('win_rate', 0),
+                # 대시보드용 추가 필드
+                'start_time': status.get('start_time'),
+                'last_trade_time': status.get('last_trade_time'),
+                'last_signal_time': status.get('last_signal_time'),
+                'last_scan_time': status.get('last_scan_time'),
+                'last_copy_time': status.get('last_copy_time'),
+                'last_funding_time': status.get('last_funding_time'),
+                'last_check_time': status.get('last_check_time'),
+                'next_trade_time': status.get('next_trade_time'),
+                'trades_today': status.get('trades_today', 0),
+                'extra': status.get('extra', {}),
             }
         except Exception as e:
             logger.error(f"Error getting status for {bot_id}: {e}")

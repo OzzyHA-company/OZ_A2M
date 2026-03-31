@@ -144,6 +144,12 @@ class BinanceGridBot:
         self.total_pnl: float = 0.0
         self.grid_profit: float = 0.0  # 그리드 차익 누적
 
+        # 시간 추적 필드 (대시보드용)
+        self.start_time: datetime = datetime.utcnow()
+        self.last_trade_time: Optional[datetime] = None
+        self.trades_today: int = 0
+        self.last_trade_date: Optional[str] = None
+
         # 콜백
         self.on_trade: Optional[Callable[[GridTrade], None]] = None
         self.on_grid_update: Optional[Callable[[], None]] = None
@@ -472,6 +478,10 @@ class BinanceGridBot:
         self.trades.append(trade)
         self.total_trades += 1
 
+        # 시간 추적 업데이트
+        self.last_trade_time = datetime.utcnow()
+        self._update_trades_today()
+
         # 상위 레벨에 매도 주문 배치
         if level + 1 < self.grid_count:
             await self._place_sell_order(level + 1)
@@ -510,6 +520,10 @@ class BinanceGridBot:
         self.total_trades += 1
         self.winning_trades += 1
 
+        # 시간 추적 업데이트
+        self.last_trade_time = datetime.utcnow()
+        self._update_trades_today()
+
         # 하위 레벨에 매수 주문 배치
         if level - 1 >= 0:
             await self._place_buy_order(level - 1)
@@ -524,6 +538,22 @@ class BinanceGridBot:
 
         if self.on_trade:
             self.on_trade(trade)
+
+    def _update_trades_today(self):
+        """오늘 거래 횟수 업데이트"""
+        today = datetime.utcnow().strftime('%Y-%m-%d')
+        if self.last_trade_date != today:
+            self.last_trade_date = today
+            self.trades_today = 0
+        self.trades_today += 1
+
+    def _count_active_orders(self) -> int:
+        """활성 주문 수 계산"""
+        count = 0
+        for grid in self.grid_levels.values():
+            if grid.buy_order_id or grid.sell_order_id:
+                count += 1
+        return count
 
     async def _check_grid_rebalance(self):
         """그리드 재조정 필요 여부 확인"""
@@ -615,7 +645,7 @@ class BinanceGridBot:
         )
 
     def get_status(self) -> Dict[str, Any]:
-        """봇 상태 반환"""
+        """봇 상태 반환 (대시보드 확장 필드 포함)"""
         win_rate = (self.winning_trades / self.total_trades * 100) if self.total_trades > 0 else 0
 
         return {
@@ -637,6 +667,20 @@ class BinanceGridBot:
             "win_rate": win_rate,
             "total_pnl": self.total_pnl,
             "grid_profit": self.grid_profit,
+            # 대시보드용 시간 추적 필드
+            "start_time": self.start_time.isoformat(),
+            "last_trade_time": self.last_trade_time.isoformat() if self.last_trade_time else None,
+            "next_trade_time": None,  # Grid 봇은 예정 시간 없음
+            "trades_today": self.trades_today,
+            # Grid 봇 특화 필드
+            "extra": {
+                "grid_range": {
+                    "low": self.grid_range_low,
+                    "high": self.grid_range_high
+                },
+                "active_orders_count": self._count_active_orders(),
+                "grid_spacing_pct": self.grid_spacing_pct
+            },
             "timestamp": datetime.utcnow().isoformat()
         }
 

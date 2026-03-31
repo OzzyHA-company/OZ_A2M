@@ -127,6 +127,14 @@ class FundingRateBot:
         self.total_trades: int = 0
         self.total_funding_payments: int = 0
 
+        # 시간 추적
+        self.start_time: datetime = datetime.utcnow()
+        self.last_trade_time: Optional[datetime] = None
+        self.last_funding_time: Optional[datetime] = None
+        self.next_funding_time: Optional[datetime] = None
+        self.trades_today: int = 0
+        self.last_trade_date: Optional[str] = None
+
         # 콜백
         self.on_funding_received: Optional[Callable[[float], None]] = None
         self.on_trade: Optional[Callable[[FundingTrade], None]] = None
@@ -382,6 +390,7 @@ class FundingRateBot:
             }
 
             # 거래 기록
+            trade_time = datetime.utcnow()
             trade = FundingTrade(
                 id=spot_order["id"],
                 exchange=exchange_id,
@@ -389,10 +398,12 @@ class FundingRateBot:
                 side="spot_buy",
                 amount=amount,
                 price=price,
-                timestamp=datetime.utcnow(),
+                timestamp=trade_time,
             )
             self.trades.append(trade)
             self.total_trades += 1
+            self.last_trade_time = trade_time
+            self._update_trades_today()
 
             logger.info(
                 f"Entered hedge position: {symbol} @ {exchange_id}, "
@@ -426,6 +437,9 @@ class FundingRateBot:
             if key in self.funding_rates:
                 rate = self.funding_rates[key]
 
+                # 다음 펀딩 시간 업데이트
+                self.next_funding_time = rate.next_funding_time
+
                 # 펀딩 시간이 지났으면 수익 기록
                 if now > rate.funding_time:
                     funding_pnl = (
@@ -435,6 +449,7 @@ class FundingRateBot:
                     )
                     self.funding_earnings += funding_pnl
                     self.total_funding_payments += 1
+                    self.last_funding_time = now
 
                     logger.info(
                         f"Funding received: {symbol} = ${funding_pnl:.4f}"
@@ -478,6 +493,7 @@ class FundingRateBot:
             trade_pnl = (exit_price - position["entry_price"]) * position["spot_amount"]
 
             # 거래 기록
+            trade_time = datetime.utcnow()
             trade = FundingTrade(
                 id=sell_order["id"],
                 exchange=exchange_id,
@@ -485,10 +501,12 @@ class FundingRateBot:
                 side="spot_sell",
                 amount=position["spot_amount"],
                 price=exit_price,
-                timestamp=datetime.utcnow(),
+                timestamp=trade_time,
                 funding_pnl=trade_pnl,
             )
             self.trades.append(trade)
+            self.last_trade_time = trade_time
+            self._update_trades_today()
 
             logger.info(
                 f"Exited position: {symbol}, trade PnL: ${trade_pnl:.4f}"
@@ -564,8 +582,26 @@ class FundingRateBot:
             f"누적 펀딩: ${self.funding_earnings:.4f}"
         )
 
+    def _update_trades_today(self):
+        """오늘 거래 횟수 업데이트"""
+        today = datetime.utcnow().strftime('%Y-%m-%d')
+        if self.last_trade_date != today:
+            self.last_trade_date = today
+            self.trades_today = 1
+        else:
+            self.trades_today += 1
+
     def get_status(self) -> Dict[str, Any]:
         """봇 상태 반환"""
+        # 현재 펀딩 레이트 정보 수집
+        current_funding_rate = None
+        next_funding_time = None
+        for key, rate in self.funding_rates.items():
+            if rate.funding_rate > 0:
+                current_funding_rate = rate.funding_rate
+                next_funding_time = rate.next_funding_time.isoformat()
+                break
+
         return {
             "bot_id": self.bot_id,
             "bot_type": "funding_rate",
@@ -584,6 +620,16 @@ class FundingRateBot:
                 }
                 for p in self.positions.values()
             ],
+            # 대시보드용 추가 필드
+            "start_time": self.start_time.isoformat(),
+            "last_trade_time": self.last_trade_time.isoformat() if self.last_trade_time else None,
+            "last_funding_time": self.last_funding_time.isoformat() if self.last_funding_time else None,
+            "next_trade_time": next_funding_time or (self.next_funding_time.isoformat() if self.next_funding_time else None),
+            "trades_today": self.trades_today,
+            "extra": {
+                "current_funding_rate": current_funding_rate,
+                "funding_interval_hours": self.funding_interval_hours,
+            },
             "timestamp": datetime.utcnow().isoformat(),
         }
 
