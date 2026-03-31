@@ -419,14 +419,24 @@ class TriangularArbBot:
             usdt_free = balance.get('USDT', {}).get('free', 0)
             sol_free = balance.get('SOL', {}).get('free', 0)
 
-            # SOL 가치를 USDT로 환산
+            # SOL 가치를 USDT로 환산 (tickers에 없으면 직접 조회)
             sol_value_usdt = 0
-            if sol_free > 0 and 'SOL/USDT' in self.tickers:
-                sol_price = self.tickers['SOL/USDT'].get('bid', 0)
+            if sol_free > 0:
+                sol_price = 0
+                if 'SOL/USDT' in self.tickers:
+                    sol_price = self.tickers['SOL/USDT'].get('bid', 0)
+                else:
+                    # 직접 가격 조회
+                    try:
+                        ticker = await self.exchange.fetch_ticker('SOL/USDT')
+                        sol_price = ticker.get('bid', 0)
+                    except Exception as e:
+                        logger.warning(f"Could not fetch SOL price: {e}")
+                        sol_price = 150.0  # fallback price
                 sol_value_usdt = sol_free * sol_price
 
             total_available = usdt_free + sol_value_usdt
-            logger.debug(f"Available balance: ${total_available:.2f} (USDT: ${usdt_free:.2f}, SOL: ${sol_value_usdt:.2f})")
+            logger.info(f"Available balance: ${total_available:.2f} (USDT: ${usdt_free:.2f}, SOL: ${sol_value_usdt:.2f})")
             return total_available
         except Exception as e:
             logger.error(f"Failed to fetch balance: {e}")
