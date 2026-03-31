@@ -82,7 +82,8 @@ class TriangularArbBot:
     """
 
     # Binance Spot 최소 주문금액 (USDT 기준)
-    MIN_NOTIONAL_USDT = 10.0
+    # ETH/USDT, BNB/USDT 등은 $5 미만도 거래 가능
+    MIN_NOTIONAL_USDT = 5.0
     SAFETY_MARGIN = 1.1
 
     def __init__(
