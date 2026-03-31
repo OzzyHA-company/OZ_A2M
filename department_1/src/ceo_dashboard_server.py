@@ -461,7 +461,7 @@ class DashboardBotManager:
                     pass
 
     async def _fetch_bybit_balance(self, ccxt_module):
-        """Bybit 잔액 조회"""
+        """Bybit 잔액 조회 (Unified Account 지원)"""
         api_key = os.environ.get('BYBIT_API_KEY')
         api_secret = os.environ.get('BYBIT_API_SECRET')
         if api_key and api_secret:
@@ -469,13 +469,17 @@ class DashboardBotManager:
                 'apiKey': api_key,
                 'secret': api_secret,
                 'enableRateLimit': True,
+                'options': {'defaultType': 'unified'}
             })
             try:
                 balance = await exchange.fetch_balance()
+                # Unified account returns different structure
+                total = balance.get('total', {})
                 self.exchange_balances['bybit'] = {
-                    'USDT': balance.get('USDT', {}).get('free', 0),
-                    'SOL': balance.get('SOL', {}).get('free', 0),
-                    'total_usdt': balance.get('USDT', {}).get('total', 0),
+                    'USDT': total.get('USDT', 0),
+                    'SOL': total.get('SOL', 0),
+                    'total_usdt': total.get('USDT', 0),
+                    'unified_equity': balance.get('info', {}).get('result', {}).get('list', [{}])[0].get('totalEquity', '0'),
                 }
             finally:
                 try:
