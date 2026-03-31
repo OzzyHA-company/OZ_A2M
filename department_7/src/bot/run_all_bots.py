@@ -84,7 +84,7 @@ BOT_CONFIGS = [
         'kwargs': {
             'bot_id': 'triarb_binance_001',
             'exchange_id': 'binance',
-            'capital': 10.35,
+            'capital': 20.0,  # 최소 $11 필요, 여유있게 $20
             'min_profit_pct': 0.001,
             'sandbox': False,
             'telegram_alerts': True
