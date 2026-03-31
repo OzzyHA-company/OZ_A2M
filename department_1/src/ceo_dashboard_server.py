@@ -902,6 +902,18 @@ async def get_profit():
     }
 
 
+@app.get("/api/system-metrics")
+async def get_system_metrics():
+    """시스템 메트릭스 (CPU/RAM/Disk/Docker)"""
+    return {
+        "cpu": bot_manager.system_metrics.get('cpu', 0),
+        "memory": bot_manager.system_metrics.get('memory', 0),
+        "disk": bot_manager.system_metrics.get('disk', 0),
+        "docker": bot_manager.system_metrics.get('docker', 0),
+        "timestamp": datetime.utcnow().isoformat()
+    }
+
+
 @app.get("/api/ai-analysis")
 async def get_ai_analysis():
     """AI 분석 리포트"""
