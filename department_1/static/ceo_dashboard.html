@@ -706,6 +706,38 @@ body{background:var(--background);color:var(--text-primary);font-family:'Rajdhan
       </div>
     </div>
 
+    <!-- 거래 시간 및 일정 -->
+    <div class="card">
+      <div class="card-title"><span class="dot" style="background:var(--neon-cyan)"></span> 봇 거래 시간 및 일정</div>
+      <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:12px;">
+        <div style="padding:12px;background:var(--card-bg);border-radius:8px;">
+          <div style="font-size:11px;color:var(--text-secondary);margin-bottom:8px;">⏰ 운영 시간</div>
+          <div style="font-size:12px;line-height:1.6;">
+            <strong>안정봇 (Grid/DCA/Scalping):</strong> 24/7 연중무휴<br>
+            <strong>Funding Rate:</strong> 08:00 / 16:00 / 24:00 (펀딩비 수취)<br>
+            <strong>Triangular Arb:</strong> 24/7 (기회 포착 시 즉시)<br>
+            <strong>Polymarket:</strong> 24/7 (예측시장 개장 시)<br>
+            <strong>IBKR Forecast:</strong> 24/6 (일요일 휴장)
+          </div>
+        </div>
+        <div style="padding:12px;background:var(--card-bg);border-radius:8px;">
+          <div style="font-size:11px;color:var(--text-secondary);margin-bottom:8px;">⚡ 도파민봇 (고위험/고수익)</div>
+          <div style="font-size:12px;line-height:1.6;">
+            <strong>Pump.fun Sniper:</strong> 24/7 (신규 토큰 감지 즉시)<br>
+            <strong>GMGN Copy:</strong> 24/7 (스마트머니 추적)<br>
+            <strong>Hyperliquid MM:</strong> 24/7 (오더북 스프레드 수취)<br>
+            <span style="color:var(--profit);">✓ 출금:</span> 수익 발생 즉시 원금 유지 + 수익 전액 출금
+          </div>
+        </div>
+      </div>
+      <div style="margin-top:12px;padding-top:12px;border-top:1px solid var(--card-border);">
+        <div style="font-size:11px;color:var(--text-secondary);">📊 현재 상태</div>
+        <div id="trading-schedule-status" style="font-size:12px;margin-top:4px;">
+          <span style="color:var(--profit);">●</span> 10개 봇 실전 가동 중 | 다음 펀딩비: <span id="next-funding">계산 중...</span>
+        </div>
+      </div>
+    </div>
+
     <div class="card">
       <div class="card-title"><span class="dot" style="background:var(--warning)"></span> 감사 로그 (Elasticsearch)</div>
       <div style="display:flex;gap:8px;margin-bottom:12px;">
@@ -2575,7 +2607,23 @@ window.addEventListener('load', () => {
   loadApiKeyStatus();
   loadAIAnalysis();
   loadIntelData();
+  updateNextFunding();
 });
+
+// 펀딩비 시간 계산
+function updateNextFunding() {
+  const now = new Date();
+  const hours = now.getUTCHours();
+  let nextFunding = '';
+
+  if (hours < 8) nextFunding = '08:00 UTC (약 ' + (8-hours) + '시간 후)';
+  else if (hours < 16) nextFunding = '16:00 UTC (약 ' + (16-hours) + '시간 후)';
+  else nextFunding = '00:00 UTC (내일, 약 ' + (24-hours) + '시간 후)';
+
+  const elem = document.getElementById('next-funding');
+  if (elem) elem.textContent = nextFunding;
+}
+setInterval(updateNextFunding, 60000);
 </script>
 
 </body>
