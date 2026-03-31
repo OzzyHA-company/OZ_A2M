@@ -21,6 +21,10 @@ import sys
 project_root = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(project_root))
 
+# 환경변수 로드 (API 키 등)
+from dotenv import load_dotenv
+load_dotenv('/home/ozzy-claw/.ozzy-secrets/master.env', override=True)
+
 from lib.core.logger import get_logger
 from department_1.src.monitoring.api_monitor import api_monitor
 from department_1.src.monitoring.log_viewer import log_viewer
@@ -443,13 +447,18 @@ class DashboardBotManager:
                 'secret': api_secret,
                 'enableRateLimit': True,
             })
-            balance = await exchange.fetch_balance()
-            self.exchange_balances['binance'] = {
-                'USDT': balance.get('USDT', {}).get('free', 0),
-                'BTC': balance.get('BTC', {}).get('free', 0),
-                'total_usdt': balance.get('USDT', {}).get('total', 0),
-            }
-            await exchange.close()
+            try:
+                balance = await exchange.fetch_balance()
+                self.exchange_balances['binance'] = {
+                    'USDT': balance.get('USDT', {}).get('free', 0),
+                    'BTC': balance.get('BTC', {}).get('free', 0),
+                    'total_usdt': balance.get('USDT', {}).get('total', 0),
+                }
+            finally:
+                try:
+                    await exchange.close()
+                except:
+                    pass
 
     async def _fetch_bybit_balance(self, ccxt_module):
         """Bybit 잔액 조회"""
@@ -461,13 +470,18 @@ class DashboardBotManager:
                 'secret': api_secret,
                 'enableRateLimit': True,
             })
-            balance = await exchange.fetch_balance()
-            self.exchange_balances['bybit'] = {
-                'USDT': balance.get('USDT', {}).get('free', 0),
-                'SOL': balance.get('SOL', {}).get('free', 0),
-                'total_usdt': balance.get('USDT', {}).get('total', 0),
-            }
-            await exchange.close()
+            try:
+                balance = await exchange.fetch_balance()
+                self.exchange_balances['bybit'] = {
+                    'USDT': balance.get('USDT', {}).get('free', 0),
+                    'SOL': balance.get('SOL', {}).get('free', 0),
+                    'total_usdt': balance.get('USDT', {}).get('total', 0),
+                }
+            finally:
+                try:
+                    await exchange.close()
+                except:
+                    pass
 
     def get_withdrawable_amount(self) -> float:
         """출금 가능 금액 계산"""
