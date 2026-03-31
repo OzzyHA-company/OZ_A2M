@@ -26,7 +26,8 @@ from department_1.src.monitoring.api_monitor import api_monitor
 from department_1.src.monitoring.log_viewer import log_viewer
 from department_1.src.monitoring.security_scanner import security_scanner
 from department_1.src.intel.intel_collector import intel_collector
-from department_2.src.verification_pipeline import verification_pipeline
+from department_2.src.verification_pipeline import VerificationPipeline
+verification_pipeline = VerificationPipeline()
 from department_5.src.performance_tracker import performance_tracker
 
 logger = get_logger(__name__)
@@ -267,25 +268,20 @@ class DashboardBotManager:
             from department_7.src.bot.pump_sniper_bot import PumpSniperBot
             from department_7.src.bot.ibkr_forecast_bot import IBKRForecastTraderBot
             from department_7.src.bot.copy_trade_bot import GMGNCopyBot
-            from department_7.src.bot.arbitrage_bot import ArbitrageBot
-            from department_7.src.bot.market_maker_bot import MarketMakerBot
-            from department_7.src.bot.trend_follower import TrendFollowerBot
 
-            # 봇 인스턴스 생성
+            # 봇 인스턴스 생성 (run_all_bots.py와 동기화 - 11개)
             bot_configs = [
-                ('grid_binance_001', BinanceGridBot, {'symbol': 'BTC/USDT', 'capital': 11}, 'stable'),
-                ('dca_binance_001', BinanceDCABot, {'symbol': 'BTC/USDT', 'capital': 14}, 'stable'),
+                ('grid_binance_001', BinanceGridBot, {'symbol': 'SOL/USDT', 'capital': 11}, 'stable'),
+                ('dca_binance_001', BinanceDCABot, {'symbol': 'SOL/USDT', 'capital': 14}, 'stable'),
+                ('triarb_binance_001', TriangularArbBot, {'capital': 10.35}, 'stable'),
+                ('funding_binance_bybit_001', FundingRateBot, {'capital': 16}, 'stable'),
+                ('grid_bybit_001', BinanceGridBot, {'symbol': 'SOL/USDT', 'capital': 8.44}, 'stable'),
                 ('scalper_bybit_001', BybitScalpingBot, {'symbol': 'SOL/USDT', 'capital': 20}, 'stable'),
-                ('triarb_binance_001', TriangularArbBot, {'capital': 20}, 'stable'),
-                ('funding_binance_bybit_001', FundingRateBot, {'capital': 20}, 'stable'),
-                ('hyperliquid_mm_001', HyperliquidMarketMakerBot, {'symbol': 'SOL-PERP', 'capital': 20}, 'dopamine'),
+                ('hyperliquid_mm_001', HyperliquidMarketMakerBot, {'symbol': 'SOL-PERP', 'capital': 10.12}, 'dopamine'),
+                ('ibkr_forecast_001', IBKRForecastTraderBot, {'symbols': ['AAPL', 'MSFT'], 'capital': 10, 'mock_mode': True}, 'stable'),
                 ('polymarket_ai_001', PolymarketAIBot, {'capital': 19.85, 'mock_mode': False}, 'stable'),
                 ('pump_sniper_001', PumpSniperBot, {'capital_sol': 0.1, 'mock_mode': False}, 'dopamine'),
-                ('ibkr_forecast_001', IBKRForecastTraderBot, {'symbols': ['AAPL', 'MSFT'], 'capital': 10}, 'stable'),
-                ('gmgn_copy_001', GMGNCopyBot, {'capital_sol': 0.1, 'mock_mode': True}, 'dopamine'),
-                ('arbitrage_001', ArbitrageBot, {'exchanges': ['binance', 'bybit']}, 'stable'),
-                ('market_maker_001', MarketMakerBot, {'exchange': 'binance', 'symbol': 'BTC/USDT'}, 'stable'),
-                ('trend_follower_001', TrendFollowerBot, {}, 'stable'),
+                ('gmgn_copy_001', GMGNCopyBot, {'capital_sol': 0.067, 'mock_mode': False}, 'dopamine'),
             ]
 
             for bot_id, bot_class, kwargs, bot_type in bot_configs:
@@ -342,6 +338,7 @@ class DashboardBotManager:
         exchange_map = {
             'grid_binance': 'Binance',
             'dca_binance': 'Binance',
+            'grid_bybit': 'Bybit',
             'scalper_bybit': 'Bybit',
             'triarb_binance': 'Binance',
             'funding_binance': 'Binance+Bybit',
