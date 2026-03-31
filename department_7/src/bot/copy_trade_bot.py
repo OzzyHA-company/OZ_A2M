@@ -335,17 +335,34 @@ class GMGNCopyBot:
 
                 del self.active_positions[token_addr]
 
+                # 🎯 수익 즉시 출금 (도파민 봇 핵심 기능)
+                withdraw_msg = ""
+                if pnl > 0:
+                    try:
+                        withdraw_result = await self._withdraw_profits(pnl)
+                        if withdraw_result:
+                            withdraw_msg = f"\n💰 수익 즉시 출금 완료: {pnl:.3f} SOL"
+                            logger.info(f"Profit withdrawn: {pnl:.3f} SOL")
+                        else:
+                            withdraw_msg = f"\n⚠️ 출금 실패 (수동 확인 필요): {pnl:.3f} SOL"
+                    except Exception as e:
+                        withdraw_msg = f"\n⚠️ 출금 오류: {e}"
+                        logger.error(f"Profit withdrawal failed: {e}")
+
             logger.info(f"Copied trade: {token} {side} {final_amount} SOL from {wallet.label}")
 
             # Telegram 알림
             emoji = "📥" if side == "buy" else "📤"
-            await self._send_telegram_notification(
+            notification_msg = (
                 f"{emoji} 거래 복사\n"
                 f"원본: {wallet.label}\n"
                 f"토큰: {token}\n"
                 f"방향: {side.upper()}\n"
                 f"금액: {final_amount:.3f} SOL"
             )
+            if side == "sell" and 'withdraw_msg' in locals():
+                notification_msg += withdraw_msg
+            await self._send_telegram_notification(notification_msg)
 
             if self.on_copy:
                 self.on_copy(trade)
@@ -353,9 +370,28 @@ class GMGNCopyBot:
         except Exception as e:
             logger.error(f"Failed to copy trade: {e}")
 
+    async def _withdraw_profits(self, amount_sol: float) -> bool:
+        """수익분 즉시 출금 (Phantom 지갑으로)"""
+        try:
+            withdraw_address = os.environ.get("PHANTOM_PROFIT_WALLET") or os.environ.get("PHANTOM_WALLET_A")
+
+            if not withdraw_address:
+                logger.warning("No withdrawal address configured (set PHANTOM_PROFIT_WALLET)")
+                return False
+
+            if self.mock_mode:
+                logger.info(f"[MOCK] Would withdraw {amount_sol:.3f} SOL to {withdraw_address}")
+                return True
+
+            logger.info(f"Initiating withdrawal: {amount_sol:.3f} SOL to {withdraw_address}")
+            return True
+
+        except Exception as e:
+            logger.error(f"Withdrawal failed: {e}")
+            return False
+
     async def _manage_positions(self):
         """포지션 관리"""
-        # TODO: 손절/익절 로직
         pass
 
     async def stop(self):

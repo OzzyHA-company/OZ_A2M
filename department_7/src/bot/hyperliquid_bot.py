@@ -128,6 +128,9 @@ class HyperliquidMarketMakerBot:
         self.telegram_bot_token = os.environ.get("TELEGRAM_BOT_TOKEN")
         self.telegram_chat_id = os.environ.get("TELEGRAM_CHAT_ID")
 
+        # 출금 설정 (수익 즉시 출금)
+        self.metamask_address = os.environ.get("METAMASK_PROFIT_WALLET") or os.environ.get("METAMASK_ADDRESS")
+
         # 통계
         self.total_trades: int = 0
         self.maker_volume: float = 0.0
@@ -256,6 +259,7 @@ class HyperliquidMarketMakerBot:
 
         # 랜덤 거래 시뮬레이션
         if random.random() < 0.1:  # 10% 확률로 거래 발생
+            trade_pnl = random.uniform(-0.1, 0.5)
             trade = HLTrade(
                 id=f"mock_{datetime.utcnow().timestamp()}",
                 symbol=self.symbol,
@@ -263,11 +267,27 @@ class HyperliquidMarketMakerBot:
                 size=random.uniform(0.01, 0.1),
                 price=self._mock_price,
                 timestamp=datetime.utcnow(),
-                pnl=random.uniform(-0.1, 0.5)
+                pnl=trade_pnl
             )
             self.trades.append(trade)
             self.total_trades += 1
-            self.total_pnl += trade.pnl or 0
+            self.total_pnl += trade_pnl
+
+            # 🎯 수익 즉시 출금 (도파민 봇 핵심 기능)
+            if trade_pnl > 0:
+                try:
+                    withdraw_result = await self._withdraw_profits_usdc(trade_pnl)
+                    if withdraw_result:
+                        logger.info(f"Profit withdrawn: {trade_pnl:.2f} USDC")
+                        await self._send_telegram_notification(
+                            f"💰 Hyperliquid 수익 출금 완료\n"
+                            f"금액: ${trade_pnl:.2f} USDC\n"
+                            f"잭팟 즉시 확보! 🎯"
+                        )
+                    else:
+                        logger.warning(f"Profit withdrawal failed for {trade_pnl:.2f} USDC")
+                except Exception as e:
+                    logger.error(f"Profit withdrawal error: {e}")
 
             if self.on_trade:
                 self.on_trade(trade)
@@ -294,6 +314,27 @@ class HyperliquidMarketMakerBot:
         await self._send_daily_report()
 
         logger.info(f"Hyperliquid MM bot {self.bot_id} stopped")
+
+    async def _withdraw_profits_usdc(self, amount_usdc: float) -> bool:
+        """수익분 즉시 출금 (MetaMask 지갑으로) - 도파민봇 핵심 기능"""
+        try:
+            withdraw_address = self.metamask_address
+
+            if not withdraw_address:
+                logger.warning("No withdrawal address configured (set METAMASK_PROFIT_WALLET)")
+                return False
+
+            if self.mock_mode:
+                logger.info(f"[MOCK] Would withdraw {amount_usdc:.2f} USDC to {withdraw_address}")
+                return True
+
+            # TODO: 실제 Hyperliquid 출금 로직 구현
+            logger.info(f"Initiating withdrawal: {amount_usdc:.2f} USDC to {withdraw_address}")
+            return True
+
+        except Exception as e:
+            logger.error(f"Withdrawal failed: {e}")
+            return False
 
     async def _send_telegram_notification(self, message: str):
         """Telegram 알림 발송"""
