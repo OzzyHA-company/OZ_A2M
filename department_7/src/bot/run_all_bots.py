@@ -84,7 +84,7 @@ BOT_CONFIGS = [
         'kwargs': {
             'bot_id': 'triarb_binance_001',
             'exchange_id': 'binance',
-            'capital': 6.0,  # 현재 USDT 잔액 $7.44 기준 (SOL+USDT 합산 사용)
+            'capital': 10.35,  # Binance 자본 분배
             'min_profit_pct': 0.001,
             'sandbox': False,
             'telegram_alerts': True
@@ -97,7 +97,7 @@ BOT_CONFIGS = [
         'class': FundingRateBot,
         'kwargs': {
             'bot_id': 'funding_binance_bybit_001',
-            'capital': 16.0,
+            'capital': 8.00,  # Bybit 자본 분배 ($24.38 중)
             'min_funding_rate': 0.0001,
             'sandbox': False,
             'telegram_alerts': True
@@ -128,7 +128,7 @@ BOT_CONFIGS = [
             'bot_id': 'scalper_bybit_001',
             'symbol': 'SOL/USDT',
             'exchange_id': 'bybit',
-            'capital': 20.0,
+            'capital': 7.94,  # Bybit 자본 분배 ($24.38 중)
             'sandbox': False,
             'telegram_alerts': True
         }
@@ -141,7 +141,7 @@ BOT_CONFIGS = [
         'kwargs': {
             'bot_id': 'hyperliquid_mm_001',
             'symbol': 'SOL-PERP',
-            'capital': 10.12,
+            'capital': 4.69,  # Phantom A 지갑 자본 ($4.69 SOL)
             'base_spread_bps': 10.0,
             'sandbox': False,
             'mock_mode': False,
@@ -168,7 +168,7 @@ BOT_CONFIGS = [
         'class': PolymarketAIBot,
         'kwargs': {
             'bot_id': 'polymarket_ai_001',
-            'capital': 19.85,
+            'capital': 19.84,  # MetaMask (Polygon) USDC 자본
             'min_edge': 0.05,
             'mock_mode': False,
             'telegram_alerts': True
