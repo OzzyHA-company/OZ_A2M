@@ -396,11 +396,14 @@ class TriangularArbBot:
                         logger.debug(f"Stale ticker data for {symbol}")
                         return False
 
-            # 최소 주문 금액 검증
+            # 최소 주문 금액 검증 (실제 잔액 기준)
+            available_usdt = await self._get_available_balance_usdt()
+            trade_capital = min(self.capital, available_usdt * 0.95)
+
             for symbol in opportunity.symbols:
                 min_notional = self._get_min_notional(symbol)
-                if self.capital < min_notional * self.SAFETY_MARGIN:
-                    logger.warning(f"Capital ${self.capital} below minimum for {symbol}")
+                if trade_capital < min_notional * self.SAFETY_MARGIN:
+                    logger.warning(f"Available ${trade_capital:.2f} below minimum for {symbol} (need ${min_notional * self.SAFETY_MARGIN:.2f})")
                     return False
 
             return True
@@ -409,22 +412,54 @@ class TriangularArbBot:
             logger.error(f"Error validating opportunity: {e}")
             return False
 
-    async def _execute_arbitrage(self, opportunity: ArbOpportunity):
-        """아비트라지 실행"""
+    async def _get_available_balance_usdt(self) -> float:
+        """사용 가능한 USDT 잔액 조회 (SOL 가치 포함)"""
         try:
-            # 첫 번째 거래: BTC -> ETH
+            balance = await self.exchange.fetch_balance()
+            usdt_free = balance.get('USDT', {}).get('free', 0)
+            sol_free = balance.get('SOL', {}).get('free', 0)
+
+            # SOL 가치를 USDT로 환산
+            sol_value_usdt = 0
+            if sol_free > 0 and 'SOL/USDT' in self.tickers:
+                sol_price = self.tickers['SOL/USDT'].get('bid', 0)
+                sol_value_usdt = sol_free * sol_price
+
+            total_available = usdt_free + sol_value_usdt
+            logger.debug(f"Available balance: ${total_available:.2f} (USDT: ${usdt_free:.2f}, SOL: ${sol_value_usdt:.2f})")
+            return total_available
+        except Exception as e:
+            logger.error(f"Failed to fetch balance: {e}")
+            return 0
+
+    async def _execute_arbitrage(self, opportunity: ArbOpportunity):
+        """아비트라지 실행 (잔액 기반 주문 사이즈 조정)"""
+        try:
+            # 실제 사용 가능한 잔액 확인
+            available_usdt = await self._get_available_balance_usdt()
+
+            # 사용할 자본 결정 (설정 자본 vs 실제 잔액 중 작은 값)
+            trade_capital = min(self.capital, available_usdt * 0.95)  # 5% 여유 두고 주문
+
+            if trade_capital < self.MIN_NOTIONAL_USDT * self.SAFETY_MARGIN:
+                logger.warning(f"Insufficient balance for arbitrage: ${trade_capital:.2f} (min: ${self.MIN_NOTIONAL_USDT * self.SAFETY_MARGIN:.2f})")
+                return
+
+            logger.info(f"Executing arbitrage with capital: ${trade_capital:.2f} (available: ${available_usdt:.2f})")
+
+            # 첫 번째 거래
             symbol1 = self.symbols[0]
-            amount1 = self._amount_to_precision(symbol1, self.capital / self.tickers[symbol1]["ask"])
+            amount1 = self._amount_to_precision(symbol1, trade_capital / self.tickers[symbol1]["ask"])
             order1 = await self.exchange.create_market_buy_order(symbol1, amount1)
             logger.info(f"Step 1: Bought {amount1} {symbol1.split('/')[1]} @ {self.tickers[symbol1]['ask']}")
 
-            # 두 번째 거래: ETH -> BNB
+            # 두 번째 거래
             symbol2 = self.symbols[1]
             amount2 = self._amount_to_precision(symbol2, amount1 / self.tickers[symbol2]["ask"])
             order2 = await self.exchange.create_market_buy_order(symbol2, amount2)
             logger.info(f"Step 2: Bought {amount2} {symbol2.split('/')[1]} @ {self.tickers[symbol2]['ask']}")
 
-            # 세 번째 거래: BNB -> BTC
+            # 세 번째 거래
             symbol3 = self.symbols[2]
             amount3 = self._amount_to_precision(symbol3, amount2 / self.tickers[symbol3]["ask"])
             order3 = await self.exchange.create_market_buy_order(symbol3, amount3)
@@ -432,7 +467,7 @@ class TriangularArbBot:
 
             # 수익 계산
             final_btc = amount3
-            initial_btc = self.capital / self.tickers[symbol1]["ask"]
+            initial_btc = trade_capital / self.tickers[symbol1]["ask"]
             profit = final_btc - initial_btc
             profit_pct = profit / initial_btc if initial_btc > 0 else 0
 
@@ -443,7 +478,7 @@ class TriangularArbBot:
                 profit_pct=profit_pct,
                 profit_amount=profit,
                 timestamp=datetime.utcnow(),
-                fees=self.total_fee_pct * self.capital
+                fees=self.total_fee_pct * trade_capital
             )
             self.trades.append(trade)
             self.executed_trades += 1
