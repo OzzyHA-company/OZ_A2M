@@ -1,0 +1,29 @@
+{
+  "timestamp": "2026-04-01T18:43:07.684634",
+  "bots": [
+    {
+      "bot_id": "grid_bybit_001",
+      "pnl": "0.9886406399999993",
+      "trades": "36",
+      "type": "grid"
+    },
+    {
+      "bot_id": "dca_binance_001",
+      "pnl": "0",
+      "trades": "0",
+      "type": "dca"
+    },
+    {
+      "bot_id": "grid_binance_001",
+      "pnl": "2.9543865000000022",
+      "trades": "108",
+      "type": "grid"
+    },
+    {
+      "bot_id": "scalper_bybit_001",
+      "pnl": "0",
+      "trades": "0",
+      "type": "scalper"
+    }
+  ]
+}
