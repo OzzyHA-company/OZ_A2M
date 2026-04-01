@@ -9,6 +9,7 @@ OZ_A2M 아키텍처 기반 트레이딩 시스템
 - 제5부서: 일일 성과분석팀 (pnl)
 - 제6부서: 연구개발팀 (rnd)
 - 외부 탐색팀: 데이터 수집 (data_sources)
+- 보상 시스템: AI 에이전트 능률 향상 (rewards)
 """
 
 from .security import (
@@ -81,6 +82,26 @@ from .pnl import (
     init_analyzer,
     init_report_generator,
     DEFAULT_PNL_CONFIG,
+)
+from .rewards import (
+    RewardEventType,
+    SafetyViolationType,
+    AgentAction,
+    RewardEvent,
+    RewardScore,
+    AgentSession,
+    BatchEvalResult,
+    TradingRewardConfig,
+    DEFAULT_REWARD_CONFIG,
+    DEFAULT_TRADING_REWARD_CONFIG,
+    RewardCalculator,
+    TradingRewardCalculator,
+    BatchEvaluator,
+    get_reward_calculator,
+    get_trading_reward_calculator,
+    init_reward_calculator,
+    get_batch_evaluator,
+    init_batch_evaluator,
 )
 
 __all__ = [
@@ -158,4 +179,23 @@ __all__ = [
     "NewsCollector",
     "SentimentAnalyzer",
     "DataRouter",
+    # 보상 시스템 (rewards)
+    "RewardEventType",
+    "SafetyViolationType",
+    "AgentAction",
+    "RewardEvent",
+    "RewardScore",
+    "AgentSession",
+    "BatchEvalResult",
+    "TradingRewardConfig",
+    "DEFAULT_REWARD_CONFIG",
+    "DEFAULT_TRADING_REWARD_CONFIG",
+    "RewardCalculator",
+    "TradingRewardCalculator",
+    "BatchEvaluator",
+    "get_reward_calculator",
+    "get_trading_reward_calculator",
+    "init_reward_calculator",
+    "get_batch_evaluator",
+    "init_batch_evaluator",
 ]
