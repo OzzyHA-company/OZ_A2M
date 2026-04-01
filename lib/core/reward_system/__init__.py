@@ -32,6 +32,14 @@ from .bot_wrapper import (
     create_trade_result,
     create_signal_result,
 )
+from .trading_agents_integration import (
+    TradingAgentsRewardBridge,
+    MultiBotTradingAgentsBridge,
+    AgentVote,
+    ConsensusResult,
+    create_agent_vote,
+    calculate_reward_multiplier,
+)
 
 __all__ = [
     # Core
@@ -69,6 +77,13 @@ __all__ = [
     'reward_aware',
     'create_trade_result',
     'create_signal_result',
+    # TradingAgents
+    'TradingAgentsRewardBridge',
+    'MultiBotTradingAgentsBridge',
+    'AgentVote',
+    'ConsensusResult',
+    'create_agent_vote',
+    'calculate_reward_multiplier',
 ]
 
 __version__ = "1.0.0"
