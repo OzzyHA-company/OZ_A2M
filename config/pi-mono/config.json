@@ -1,0 +1,16 @@
+{
+  "gemini": {
+    "session_cookies": {
+      "__Secure-1PSID": "g.a0008Qhv7_u8yAJ0rXo0U4zRTAXiI87c_RhoOvW6_hePBSzHxPDlAlXzgCddYAce9HduRvJFYgACgYKAVcSARMSFQHGX2Mi3-3KpZcMyc7IqLvujRwIABoVAUF8yKpv4jgMPH-jcQJBx6mRZ19Q0076",
+      "__Secure-1PSIDTS": "sidts-CjABWhotCa1_pJzXwM56sdPoXrIUOzEZoHKbkkoFGZGTNEKLVNJXOzHJKZ8Oui3Au6IQAA",
+      "__Secure-1PSIDCC": "AKEyXzWhj1wOUYu6e0CXHQji7RyVsUhBKtVjhWpHDSC3ZWOt64EnQN8crVL7gGTo6o_ne92ijQ",
+      "SID": "g.a0008Qhv7_u8yAJ0rXo0U4zRTAXiI87c_RhoOvW6_hePBSzHxPDlGFo7k-MaeD_Kf1MTHFHhIQACgYKAdESARMSFQHGX2MiUuY6P_pzHnJqCjHD9-B4OxoVAUF8yKrP1SMQFWijhZ7bYbNHbYg50076",
+      "SSID": "AjLdX5Pc4mbYKqk6X",
+      "APISID": "aub3U8AhQBJZ_05_/AiJmi2-IqRiwmN26V",
+      "SAPISID": "Nqdg9hsXWGBMRrwD/AjFyK4gx_m4fu2sGM"
+    },
+    "last_updated": "2026-04-01T13:38:45.269109",
+    "expires_at": "2026-04-08T13:38:45.269118",
+    "auto_refresh_enabled": true
+  }
+}

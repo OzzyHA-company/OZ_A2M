@@ -259,11 +259,37 @@ class BybitScalpingBot:
             raise
 
         try:
+            price_history = []
             while self.state == BotState.RUNNING:
                 try:
                     # 포지션 모니터링
                     if self.position:
                         await self._check_exit_conditions()
+                    else:
+                        # MQTT 신호가 없으면 자체 RSI 신호로 진입 판단
+                        signal_timeout = 300  # 5분 이상 신호 없으면 자체 판단
+                        no_signal = (self.last_signal_time is None or
+                                     (datetime.utcnow() - self.last_signal_time).total_seconds() > signal_timeout)
+                        if no_signal and self.daily_pnl > -self.max_daily_loss:
+                            try:
+                                ticker = self.exchange.fetch_ticker(self.symbol)
+                                price = ticker["last"]
+                                price_history.append(price)
+                                if len(price_history) > 20:
+                                    price_history.pop(0)
+                                if len(price_history) >= 14:
+                                    gains = [max(0, price_history[i] - price_history[i-1]) for i in range(1, len(price_history))]
+                                    losses = [max(0, price_history[i-1] - price_history[i]) for i in range(1, len(price_history))]
+                                    avg_gain = sum(gains[-14:]) / 14
+                                    avg_loss = sum(losses[-14:]) / 14
+                                    rsi = 100 - (100 / (1 + avg_gain / avg_loss)) if avg_loss > 0 else 100
+                                    if rsi < 35:
+                                        amount = min(self.max_position_size, self.balance * 0.9 / price)
+                                        if amount > 0.001:
+                                            logger.info(f"[자체신호] RSI {rsi:.1f} < 35 → 매수 시도")
+                                            await self.open_long(round(amount, 4))
+                            except Exception as e:
+                                logger.debug(f"Auto signal error: {e}")
 
                     # 잔고 업데이트
                     await self._update_balance()

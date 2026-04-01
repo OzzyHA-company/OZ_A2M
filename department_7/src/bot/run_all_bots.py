@@ -44,23 +44,7 @@ bot_tasks = []
 
 # 봇 설정
 BOT_CONFIGS = [
-    # 봇-01: Binance Grid
-    {
-        'id': 'grid_binance_001',
-        'name': 'Binance Grid',
-        'class': BinanceGridBot,
-        'kwargs': {
-            'bot_id': 'grid_binance_001',
-            'symbol': 'SOL/USDT',
-            'exchange_id': 'binance',
-            'capital': 11.0,
-            'grid_count': 20,
-            'grid_spacing_pct': 0.005,
-            'sandbox': False,
-            'telegram_alerts': True
-        }
-    },
-    # 봇-02: Binance DCA
+    # 봇-02: Binance DCA (Grid보다 먼저 실행 - USDT 선점 방지)
     {
         'id': 'dca_binance_001',
         'name': 'Binance DCA',
@@ -72,6 +56,22 @@ BOT_CONFIGS = [
             'capital': 14.0,
             'dca_drop_pct': 0.02,
             'take_profit_pct': 0.03,
+            'sandbox': False,
+            'telegram_alerts': True
+        }
+    },
+    # 봇-01: Binance Grid (DCA 후 실행 - 남은 USDT로 sell 위주)
+    {
+        'id': 'grid_binance_001',
+        'name': 'Binance Grid',
+        'class': BinanceGridBot,
+        'kwargs': {
+            'bot_id': 'grid_binance_001',
+            'symbol': 'SOL/USDT',
+            'exchange_id': 'binance',
+            'capital': 11.0,
+            'grid_count': 20,
+            'grid_spacing_pct': 0.005,
             'sandbox': False,
             'telegram_alerts': True
         }
@@ -97,7 +97,7 @@ BOT_CONFIGS = [
         'class': FundingRateBot,
         'kwargs': {
             'bot_id': 'funding_binance_bybit_001',
-            'capital': 8.00,  # Bybit 자본 분배 ($24.38 중)
+            'capital': 5.40,  # Bybit 자본 분배 재조정 ($24.40 중)
             'min_funding_rate': 0.0001,
             'sandbox': False,
             'telegram_alerts': True
@@ -112,7 +112,7 @@ BOT_CONFIGS = [
             'bot_id': 'grid_bybit_001',
             'symbol': 'SOL/USDT',
             'exchange_id': 'bybit',
-            'capital': 8.44,
+            'capital': 11.0,
             'grid_count': 15,
             'grid_spacing_pct': 0.005,
             'sandbox': False,
@@ -128,7 +128,7 @@ BOT_CONFIGS = [
             'bot_id': 'scalper_bybit_001',
             'symbol': 'SOL/USDT',
             'exchange_id': 'bybit',
-            'capital': 7.94,  # Bybit 자본 분배 ($24.38 중)
+            'capital': 8.00,  # Bybit 자본 분배 재조정 ($24.40 중)
             'sandbox': False,
             'telegram_alerts': True
         }

@@ -104,6 +104,10 @@ class GMGNCopyBot:
 
         # API
         self.helius_parse_url = os.environ.get("HELIUS_PARSE_TX_URL")
+        self.helius_api_key = os.environ.get("HELIUS_API_KEY")
+
+        # 중복 거래 필터링
+        self._seen_signatures: set = set()
 
         # MQTT
         mqtt_config = MQTTConfig(host=mqtt_host, port=mqtt_port, client_id=bot_id)
@@ -267,7 +271,7 @@ class GMGNCopyBot:
                 logger.error(f"Error monitoring wallet {address}: {e}")
 
     async def _fetch_wallet_transactions(self, wallet_address: str) -> List[Dict]:
-        """지갑 거래 내역 조회"""
+        """지갑 거래 내역 조회 - Helius Enhanced Transaction API"""
         if self.mock_mode:
             # Mock 거래 데이터
             import random
@@ -275,24 +279,101 @@ class GMGNCopyBot:
                 return [{
                     "signature": f"mock_tx_{random.randint(1000, 9999)}",
                     "token": f"MOCK{random.randint(1, 99)}",
+                    "token_address": f"mock_token_{random.randint(1000, 9999)}",
                     "side": "buy" if random.random() > 0.5 else "sell",
                     "amount": random.uniform(0.01, 0.1),
                     "price": random.uniform(0.001, 0.01)
                 }]
             return []
 
-        # TODO: Helius 또는 Solscan API로 거래 내역 조회
-        return []
+        # Helius API로 거래 내역 조회
+        import aiohttp
+
+        try:
+            api_key = self.helius_api_key or os.environ.get("HELIUS_API_KEY")
+            if not api_key:
+                logger.warning("HELIUS_API_KEY not set")
+                return []
+
+            helius_url = f"https://api.helius-rpc.com/v0/addresses/{wallet_address}/transactions"
+
+            async with aiohttp.ClientSession() as session:
+                params = {"api-key": api_key, "limit": 10}
+                async with session.get(helius_url, params=params) as resp:
+                    if resp.status != 200:
+                        logger.warning(f"Helius API error: {resp.status}")
+                        return []
+
+                    txs = await resp.json()
+                    if not isinstance(txs, list):
+                        logger.warning(f"Unexpected Helius response format")
+                        return []
+
+                    parsed_txs = []
+                    for tx in txs:
+                        # tokenTransfers에서 스왑 정보 추출
+                        token_transfers = tx.get("tokenTransfers", [])
+                        native_transfers = tx.get("nativeTransfers", [])
+
+                        if token_transfers:
+                            # 첫 번째 토큰 전송을 기준으로 side 결정
+                            first_transfer = token_transfers[0]
+                            from_addr = first_transfer.get("fromUserAccount", "")
+                            to_addr = first_transfer.get("toUserAccount", "")
+                            token_addr = first_transfer.get("mint", "")
+                            amount = first_transfer.get("tokenAmount", 0)
+
+                            # side 결정: 추적 지갑이 받으면 buy, 본면 sell
+                            side = "buy" if to_addr.lower() == wallet_address.lower() else "sell"
+
+                            parsed_txs.append({
+                                "signature": tx.get("signature", ""),
+                                "token": token_addr[:8] + "..." if len(token_addr) > 8 else token_addr,
+                                "token_address": token_addr,
+                                "side": side,
+                                "amount": float(amount) if amount else 0,
+                                "price": 0,  # 가격은 별도 조회 필요
+                                "timestamp": tx.get("timestamp", 0),
+                                "description": tx.get("description", "")
+                            })
+
+                    return parsed_txs
+
+        except Exception as e:
+            logger.error(f"Error fetching transactions: {e}")
+            return []
 
     def _is_new_trade(self, transaction: Dict) -> bool:
-        """새로운 거래 여부 확인"""
-        # TODO: 중복 거래 필터링
+        """새로운 거래 여부 확인 - 중복 필터링"""
+        sig = transaction.get("signature", "")
+        if not sig:
+            return False
+
+        # 이미 본 거래인지 확인
+        if sig in self._seen_signatures:
+            return False
+
+        # 새로운 거래 기록
+        self._seen_signatures.add(sig)
+
+        # 최대 1000개 유지 (메모리 관리)
+        if len(self._seen_signatures) > 1000:
+            # 가장 오래된 항목 제거 (set이므로 pop)
+            self._seen_signatures.pop()
+
         return True
 
     async def _copy_trade(self, wallet: TrackedWallet, transaction: Dict):
-        """거래 복사"""
+        """거래 복사 - Jupiter API로 실제 스왑 실행"""
+        import aiohttp
+        import base64
+        from solders.keypair import Keypair
+        from solders.transaction import VersionedTransaction
+        from solana.rpc.async_api import AsyncClient
+
         try:
-            token = transaction.get("token", "UNKNOWN")
+            token_address = transaction.get("token_address", "")
+            token_symbol = transaction.get("token", "UNKNOWN")
             side = transaction.get("side", "buy")
             original_amount = transaction.get("amount", 0)
 
@@ -301,21 +382,117 @@ class GMGNCopyBot:
             max_amount = self.capital_sol * self.max_position_pct
             final_amount = min(copy_amount, max_amount)
 
-            if final_amount <= 0:
+            if final_amount <= 0 or not token_address:
                 return
 
-            # 거래 실행
+            # Mock 모드: 거래 기록만
+            if self.mock_mode:
+                self.total_copies += 1
+                copy_time = datetime.utcnow()
+                trade = CopyTrade(
+                    id=f"copy_{copy_time.timestamp()}",
+                    original_wallet=wallet.address,
+                    token_address=token_address,
+                    token_symbol=token_symbol,
+                    side=side,
+                    amount=final_amount,
+                    price=transaction.get("price", 0),
+                    timestamp=copy_time
+                )
+                self.trades.append(trade)
+                self.last_copy_time = copy_time
+                self.last_trade_time = copy_time
+                self._update_trades_today()
+                logger.info(f"[MOCK] Copied trade: {token_symbol} {side} {final_amount} SOL")
+                return
+
+            # 실제 Jupiter 스왑 실행
+            private_key = os.environ.get("SOLANA_PRIVATE_KEY")
+            if not private_key:
+                logger.error("SOLANA_PRIVATE_KEY not set")
+                return
+
+            keypair = Keypair.from_base58_string(private_key)
+            wallet_pubkey = str(keypair.pubkey())
+
+            # Jupiter 스왑 파라미터 설정
+            sol_mint = "So11111111111111111111111111111111111111112"
+            input_mint = sol_mint if side == "buy" else token_address
+            output_mint = token_address if side == "buy" else sol_mint
+            amount_lamports = int(final_amount * 1e9)
+
+            async with aiohttp.ClientSession() as session:
+                # 1. Quote
+                quote_url = "https://quote-api.jup.ag/v6/quote"
+                params = {
+                    "inputMint": input_mint,
+                    "outputMint": output_mint,
+                    "amount": amount_lamports,
+                    "slippageBps": 1000,
+                    "onlyDirectRoutes": "false"
+                }
+
+                async with session.get(quote_url, params=params) as resp:
+                    if resp.status != 200:
+                        logger.error(f"Jupiter quote failed: {resp.status}")
+                        return
+                    quote_resp = await resp.json()
+
+                if not quote_resp.get("routePlan"):
+                    logger.error("No routes found")
+                    return
+
+                # 가격 계산
+                in_amt = int(quote_resp.get("inAmount", 1))
+                out_amt = int(quote_resp.get("outAmount", 0))
+                price = out_amt / in_amt if in_amt > 0 else 0
+
+                # 2. Swap transaction
+                swap_url = "https://quote-api.jup.ag/v6/swap"
+                swap_payload = {
+                    "quoteResponse": quote_resp,
+                    "userPublicKey": wallet_pubkey,
+                    "wrapAndUnwrapSol": True,
+                    "prioritizationFeeLamports": 10000
+                }
+
+                async with session.post(swap_url, json=swap_payload) as resp:
+                    if resp.status != 200:
+                        logger.error(f"Jupiter swap request failed: {resp.status}")
+                        return
+                    swap_resp = await resp.json()
+
+                swap_tx_b64 = swap_resp.get("swapTransaction")
+                if not swap_tx_b64:
+                    logger.error("No swap transaction")
+                    return
+
+            # 3. Sign and send
+            tx_bytes = base64.b64decode(swap_tx_b64)
+            tx = VersionedTransaction.from_bytes(tx_bytes)
+            signed_tx = VersionedTransaction(tx.message, [keypair])
+
+            helius_url = os.environ.get("HELIUS_RPC_URL")
+            if not helius_url:
+                logger.error("HELIUS_RPC_URL not set")
+                return
+
+            async with AsyncClient(helius_url) as client:
+                result = await client.send_raw_transaction(bytes(signed_tx))
+                signature = result.value
+                logger.info(f"Copy trade tx sent: {signature}")
+
+            # 거래 기록
             self.total_copies += 1
             copy_time = datetime.utcnow()
-
             trade = CopyTrade(
                 id=f"copy_{copy_time.timestamp()}",
                 original_wallet=wallet.address,
-                token_address=token,
-                token_symbol=token,
+                token_address=token_address,
+                token_symbol=token_symbol,
                 side=side,
                 amount=final_amount,
-                price=transaction.get("price", 0),
+                price=price,
                 timestamp=copy_time
             )
             self.trades.append(trade)
@@ -324,56 +501,43 @@ class GMGNCopyBot:
             self._update_trades_today()
 
             # 포지션 업데이트
-            token_addr = transaction.get("token_address", token)
             if side == "buy":
-                self.active_positions[token_addr] = {
-                    "token": token,
+                self.active_positions[token_address] = {
+                    "token": token_symbol,
                     "amount": final_amount,
-                    "entry_price": transaction.get("price", 0),
+                    "entry_price": price,
                     "copied_from": wallet.address
                 }
-            elif side == "sell" and token_addr in self.active_positions:
-                position = self.active_positions[token_addr]
-                entry = position["entry_price"]
-                exit_price = transaction.get("price", entry)
-
-                pnl = (exit_price - entry) / entry * final_amount if entry > 0 else 0
+            elif side == "sell" and token_address in self.active_positions:
+                position = self.active_positions[token_address]
+                entry = position.get("entry_price", price)
+                pnl = (price - entry) / entry * final_amount if entry > 0 else 0
                 trade.pnl = pnl
                 self.total_pnl_sol += pnl
 
                 if pnl > 0:
                     self.successful_copies += 1
-
-                del self.active_positions[token_addr]
-
-                # 🎯 수익 즉시 출금 (도파민 봇 핵심 기능)
-                withdraw_msg = ""
-                if pnl > 0:
+                    # 수익 출금
                     try:
                         withdraw_result = await self._withdraw_profits(pnl)
                         if withdraw_result:
-                            withdraw_msg = f"\n💰 수익 즉시 출금 완료: {pnl:.3f} SOL"
                             logger.info(f"Profit withdrawn: {pnl:.3f} SOL")
-                        else:
-                            withdraw_msg = f"\n⚠️ 출금 실패 (수동 확인 필요): {pnl:.3f} SOL"
                     except Exception as e:
-                        withdraw_msg = f"\n⚠️ 출금 오류: {e}"
-                        logger.error(f"Profit withdrawal failed: {e}")
+                        logger.error(f"Withdrawal failed: {e}")
 
-            logger.info(f"Copied trade: {token} {side} {final_amount} SOL from {wallet.label}")
+                del self.active_positions[token_address]
+
+            logger.info(f"Copied trade: {token_symbol} {side} {final_amount} SOL")
 
             # Telegram 알림
             emoji = "📥" if side == "buy" else "📤"
-            notification_msg = (
+            await self._send_telegram_notification(
                 f"{emoji} 거래 복사\n"
                 f"원본: {wallet.label}\n"
-                f"토큰: {token}\n"
+                f"토큰: {token_symbol}\n"
                 f"방향: {side.upper()}\n"
                 f"금액: {final_amount:.3f} SOL"
             )
-            if side == "sell" and 'withdraw_msg' in locals():
-                notification_msg += withdraw_msg
-            await self._send_telegram_notification(notification_msg)
 
             if self.on_copy:
                 self.on_copy(trade)
@@ -382,7 +546,14 @@ class GMGNCopyBot:
             logger.error(f"Failed to copy trade: {e}")
 
     async def _withdraw_profits(self, amount_sol: float) -> bool:
-        """수익분 즉시 출금 (Phantom 지갑으로)"""
+        """수익분 즉시 출금 (Phantom 지갑으로) - Solana SOL 전송"""
+        from solders.keypair import Keypair
+        from solders.pubkey import Pubkey
+        from solders.system_program import transfer, TransferParams
+        from solders.message import MessageV0
+        from solders.transaction import VersionedTransaction
+        from solana.rpc.async_api import AsyncClient
+
         try:
             withdraw_address = os.environ.get("PHANTOM_PROFIT_WALLET") or os.environ.get("PHANTOM_WALLET_A")
 
@@ -394,8 +565,49 @@ class GMGNCopyBot:
                 logger.info(f"[MOCK] Would withdraw {amount_sol:.3f} SOL to {withdraw_address}")
                 return True
 
-            logger.info(f"Initiating withdrawal: {amount_sol:.3f} SOL to {withdraw_address}")
-            return True
+            # Private key 로드
+            private_key = os.environ.get("SOLANA_PRIVATE_KEY")
+            if not private_key:
+                logger.error("SOLANA_PRIVATE_KEY not set")
+                return False
+
+            keypair = Keypair.from_base58_string(private_key)
+
+            # Solana RPC 연결
+            helius_url = os.environ.get("HELIUS_RPC_URL")
+            if not helius_url:
+                logger.error("HELIUS_RPC_URL not set")
+                return False
+
+            async with AsyncClient(helius_url) as client:
+                # 최신 blockhash
+                bh_resp = await client.get_latest_blockhash()
+                blockhash = bh_resp.value.blockhash
+
+                # 전송 instruction
+                ix = transfer(
+                    TransferParams(
+                        from_pubkey=keypair.pubkey(),
+                        to_pubkey=Pubkey.from_string(withdraw_address),
+                        lamports=int(amount_sol * 1e9)
+                    )
+                )
+
+                # 트랜잭션 생성 및 서명
+                msg = MessageV0.try_compile(
+                    keypair.pubkey(),
+                    [ix],
+                    [],
+                    blockhash
+                )
+                tx = VersionedTransaction(msg, [keypair])
+
+                # 전송
+                result = await client.send_raw_transaction(bytes(tx))
+                signature = result.value
+                logger.info(f"Withdrawal tx sent: {signature}")
+
+                return True
 
         except Exception as e:
             logger.error(f"Withdrawal failed: {e}")

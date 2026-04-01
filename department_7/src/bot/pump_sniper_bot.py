@@ -190,13 +190,16 @@ class PumpSniperBot:
                     ping_timeout=10
                 )
 
-                # Pump.fun 프로그램 구독
+                # Pump.fun 프로그램 로그 구독 (더 안정적인 신규 토큰 감지)
                 pump_fun_program = "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P"
                 subscribe_msg = {
                     "jsonrpc": "2.0",
                     "id": 1,
-                    "method": "programSubscribe",
-                    "params": [pump_fun_program, {"encoding": "jsonParsed"}]
+                    "method": "logsSubscribe",
+                    "params": [
+                        {"mentions": [pump_fun_program]},
+                        {"commitment": "processed"}
+                    ]
                 }
                 await self.solana_ws.send(json.dumps(subscribe_msg))
 
@@ -318,8 +321,49 @@ class PumpSniperBot:
                 await asyncio.sleep(5)
 
     def _is_new_token_launch(self, data: Dict) -> bool:
-        """신규 토큰 런치 여부 확인"""
-        # TODO: Pump.fun 프로그램 로그 파싱
+        """신규 토큰 런치 여부 확인 - QuickNode logsSubscribe 응답 파싱"""
+        try:
+            # logsSubscribe 방식: logsNotification 이벤트
+            if data.get("method") == "logsNotification":
+                params = data.get("params", {})
+                result = params.get("result", {})
+                value = result.get("value", {})
+                logs = value.get("logs", [])
+                signature = value.get("signature", "")
+
+                # Pump.fun "Create" instruction 로그 확인
+                for log in logs:
+                    if "Instruction: Create" in log:
+                        logger.info(f"New token launch detected via logs: {signature[:20]}...")
+                        return True
+
+            # programSubscribe 방식: programNotification 이벤트
+            if data.get("method") == "programNotification":
+                params = data.get("params", {})
+                result = params.get("result", {})
+                value = result.get("value", {})
+                account_data = value.get("account", {}).get("data", [])
+
+                # BondingCurve 계정 크기 확인 (Pump.fun BondingCurve는 특정 크기)
+                if isinstance(account_data, list) and len(account_data) > 0:
+                    data_str = account_data[0] if account_data else ""
+                    # Base64 디코딩 후 크기 확인 (대략 200바이트)
+                    import base64
+                    try:
+                        decoded = base64.b64decode(data_str)
+                        if len(decoded) >= 200:
+                            logger.info(f"Potential BondingCurve account detected: {len(decoded)} bytes")
+                            return True
+                    except Exception:
+                        pass
+
+            # Mock 데이터 처리 (테스트용)
+            if data.get("address") and data.get("symbol"):
+                return True
+
+        except Exception as e:
+            logger.debug(f"Token launch check error: {e}")
+
         return False
 
     async def _handle_new_token(self, token_data: Dict):
@@ -356,55 +400,78 @@ class PumpSniperBot:
         return min(10, max(0, score + random.randint(-2, 3)))
 
     async def _execute_snipe(self, address: str, symbol: str, name: str):
-        """스나이핑 실행"""
+        """스나이핑 실행 - Jupiter API로 실제 스왑"""
         try:
             self.status = SniperStatus.SNIPING
             self.tokens_sniped += 1
 
-            # 매수 시뮬레이션
-            buy_price = 0.0001  # 초기 가격
-            amount = self.capital_sol * 0.5  # 자본의 50% 사용
+            amount_sol = self.capital_sol * 0.5  # 자본의 50% 사용
 
-            snipe = TokenSnipe(
-                address=address,
-                symbol=symbol,
-                name=name,
-                detected_at=datetime.utcnow(),
-                buy_price=buy_price,
-                amount=amount,
-                current_price=buy_price,
-                highest_price=buy_price
-            )
-            self.active_snipes[address] = snipe
+            if self.mock_mode:
+                # Mock 모드
+                buy_price = 0.0001
+                snipe = TokenSnipe(
+                    address=address,
+                    symbol=symbol,
+                    name=name,
+                    detected_at=datetime.utcnow(),
+                    buy_price=buy_price,
+                    amount=amount_sol,
+                    current_price=buy_price,
+                    highest_price=buy_price
+                )
+                self.active_snipes[address] = snipe
+                logger.info(f"[MOCK] Sniped: {symbol} with {amount_sol} SOL")
+                self.status = SniperStatus.RUNNING
+                return
 
-            # 거래 기록
-            trade_time = datetime.utcnow()
-            trade = SnipeTrade(
-                id=f"snipe_{trade_time.timestamp()}",
-                token_address=address,
-                token_symbol=symbol,
-                side="buy",
-                amount=amount,
-                price=buy_price,
-                timestamp=trade_time
-            )
-            self.trades.append(trade)
-            self.last_trade_time = trade_time
-            self._update_trades_today()
+            # 실제 Jupiter 스왑 실행
+            buy_price = await self._execute_jupiter_swap(address, amount_sol)
 
-            logger.info(f"Sniped: {symbol} with {amount} SOL")
+            if buy_price > 0:
+                snipe = TokenSnipe(
+                    address=address,
+                    symbol=symbol,
+                    name=name,
+                    detected_at=datetime.utcnow(),
+                    buy_price=buy_price,
+                    amount=amount_sol,
+                    current_price=buy_price,
+                    highest_price=buy_price
+                )
+                self.active_snipes[address] = snipe
 
-            # Telegram 알림
-            await self._send_telegram_notification(
-                f"🎯 스나이핑 성공!\n"
-                f"토큰: {symbol}\n"
-                f"이름: {name[:30]}\n"
-                f"주소: {address[:15]}...\n"
-                f"투입: {amount:.3f} SOL"
-            )
+                # 거래 기록
+                trade_time = datetime.utcnow()
+                trade = SnipeTrade(
+                    id=f"snipe_{trade_time.timestamp()}",
+                    token_address=address,
+                    token_symbol=symbol,
+                    side="buy",
+                    amount=amount_sol,
+                    price=buy_price,
+                    timestamp=trade_time
+                )
+                self.trades.append(trade)
+                self.last_trade_time = trade_time
+                self._update_trades_today()
 
-            if self.on_snipe:
-                self.on_snipe(snipe)
+                logger.info(f"Sniped: {symbol} with {amount_sol} SOL @ {buy_price}")
+
+                # Telegram 알림
+                await self._send_telegram_notification(
+                    f"🎯 스나이핑 성공!\n"
+                    f"토큰: {symbol}\n"
+                    f"이름: {name[:30]}\n"
+                    f"주소: {address[:15]}...\n"
+                    f"투입: {amount_sol:.3f} SOL\n"
+                    f"가격: {buy_price:.10f}"
+                )
+
+                if self.on_snipe:
+                    self.on_snipe(snipe)
+            else:
+                logger.error(f"Snipe failed for {symbol}: swap returned 0 price")
 
             self.status = SniperStatus.RUNNING
 
@@ -412,37 +479,153 @@ class PumpSniperBot:
             logger.error(f"Failed to execute snipe: {e}")
             self.status = SniperStatus.ERROR
 
+    async def _execute_jupiter_swap(self, token_address: str, amount_sol: float) -> float:
+        """Jupiter API로 SOL -> 토큰 스왑 실행, buy_price 반환"""
+        import aiohttp
+        import base64
+        from solders.keypair import Keypair
+        from solders.transaction import VersionedTransaction
+        from solana.rpc.async_api import AsyncClient
+
+        try:
+            # Private key 로드
+            private_key = os.environ.get("SOLANA_PRIVATE_KEY")
+            if not private_key:
+                logger.error("SOLANA_PRIVATE_KEY not set")
+                return 0.0
+
+            keypair = Keypair.from_base58_string(private_key)
+            wallet_pubkey = str(keypair.pubkey())
+
+            # 1. Jupiter Quote API
+            async with aiohttp.ClientSession() as session:
+                quote_url = "https://quote-api.jup.ag/v6/quote"
+                params = {
+                    "inputMint": "So11111111111111111111111111111111111111112",  # SOL
+                    "outputMint": token_address,
+                    "amount": int(amount_sol * 1e9),  # lamports
+                    "slippageBps": 1000,  # 10%
+                    "onlyDirectRoutes": "false"
+                }
+
+                async with session.get(quote_url, params=params) as resp:
+                    if resp.status != 200:
+                        logger.error(f"Jupiter quote failed: {resp.status}")
+                        return 0.0
+                    quote_resp = await resp.json()
+
+                if not quote_resp.get("routePlan"):
+                    logger.error("No routes found from Jupiter")
+                    return 0.0
+
+                out_amount = int(quote_resp.get("outAmount", 0))
+                in_amount = int(quote_resp.get("inAmount", 1))
+                buy_price = out_amount / in_amount if in_amount > 0 else 0
+
+                # 2. Swap Transaction 생성
+                swap_url = "https://quote-api.jup.ag/v6/swap"
+                swap_payload = {
+                    "quoteResponse": quote_resp,
+                    "userPublicKey": wallet_pubkey,
+                    "wrapAndUnwrapSol": True,
+                    "prioritizationFeeLamports": 10000  # 0.00001 SOL priority fee
+                }
+
+                async with session.post(swap_url, json=swap_payload) as resp:
+                    if resp.status != 200:
+                        logger.error(f"Jupiter swap request failed: {resp.status}")
+                        return 0.0
+                    swap_resp = await resp.json()
+
+                swap_tx_b64 = swap_resp.get("swapTransaction")
+                if not swap_tx_b64:
+                    logger.error("No swap transaction returned")
+                    return 0.0
+
+            # 3. 트랜잭션 서명 및 전송
+            tx_bytes = base64.b64decode(swap_tx_b64)
+            tx = VersionedTransaction.from_bytes(tx_bytes)
+            signed_tx = VersionedTransaction(tx.message, [keypair])
+
+            # Solana RPC로 전송
+            helius_url = os.environ.get("HELIUS_RPC_URL")
+            if not helius_url:
+                logger.error("HELIUS_RPC_URL not set")
+                return 0.0
+
+            async with AsyncClient(helius_url) as client:
+                result = await client.send_raw_transaction(
+                    bytes(signed_tx),
+                    opts={"skipPreflight": False, "preflightCommitment": "confirmed"}
+                )
+                signature = result.value
+                logger.info(f"Swap tx sent: {signature}")
+
+                # 트랜잭션 확인 대기
+                await asyncio.sleep(2)
+
+            return buy_price
+
+        except Exception as e:
+            logger.error(f"Jupiter swap error: {e}")
+            return 0.0
+
     async def _monitor_positions(self):
-        """보유 포지션 모니터링"""
-        import random
+        """보유 포지션 모니터링 - Jupiter Price API로 실제 가격 조회"""
+        import aiohttp
 
         for address, snipe in list(self.active_snipes.items()):
             if snipe.status == "sold":
                 continue
 
             try:
-                # 가격 업데이트 (실제로는 Jupiter API 등 사용)
                 if self.mock_mode:
                     # Mock 가격 변동
+                    import random
                     change = random.uniform(-0.2, 0.5)
                     snipe.current_price = snipe.buy_price * (1 + change)
                 else:
-                    # TODO: 실제 가격 조회
-                    pass
+                    # 실제 가격 조회 - Jupiter Price API
+                    async with aiohttp.ClientSession() as session:
+                        price_url = f"https://api.jup.ag/price/v2?ids={address}"
+                        async with session.get(price_url) as resp:
+                            if resp.status == 200:
+                                data = await resp.json()
+                                token_data = data.get("data", {}).get(address, {})
+                                price_usd = float(token_data.get("price", 0))
+
+                                # USD -> SOL 환산 (SOL 가격 별도 조회)
+                                sol_price_url = "https://api.jup.ag/price/v2?ids=So11111111111111111111111111111111111111112"
+                                async with session.get(sol_price_url) as sol_resp:
+                                    if sol_resp.status == 200:
+                                        sol_data = await sol_resp.json()
+                                        sol_price_usd = float(sol_data.get("data", {}).get("So11111111111111111111111111111111111111112", {}).get("price", 1))
+                                        if sol_price_usd > 0:
+                                            snipe.current_price = price_usd / sol_price_usd
+                                        else:
+                                            logger.debug(f"Invalid SOL price, skipping update")
+                                            continue
+                                    else:
+                                        logger.debug(f"Failed to get SOL price: {sol_resp.status}")
+                                        continue
+                            else:
+                                logger.debug(f"Price fetch failed for {address}: {resp.status}")
+                                continue
 
                 # 최고가 업데이트
                 if snipe.current_price > snipe.highest_price:
                     snipe.highest_price = snipe.current_price
 
                 # 익절/손절 체크
-                pnl_pct = (snipe.current_price - snipe.buy_price) / snipe.buy_price
+                if snipe.buy_price > 0:
+                    pnl_pct = (snipe.current_price - snipe.buy_price) / snipe.buy_price
 
-                if pnl_pct >= self.take_profit_low:
-                    # 익절
-                    await self._sell_token(address, snipe, pnl_pct)
-                elif pnl_pct <= -self.stop_loss:
-                    # 손절
-                    await self._sell_token(address, snipe, pnl_pct)
+                    if pnl_pct >= self.take_profit_low:
+                        logger.info(f"Take profit triggered for {snipe.symbol}: {pnl_pct:.1%}")
+                        await self._sell_token(address, snipe, pnl_pct)
+                    elif pnl_pct <= -self.stop_loss:
+                        logger.info(f"Stop loss triggered for {snipe.symbol}: {pnl_pct:.1%}")
+                        await self._sell_token(address, snipe, pnl_pct)
 
             except Exception as e:
                 logger.error(f"Error monitoring position {address}: {e}")
@@ -508,7 +691,14 @@ class PumpSniperBot:
             logger.error(f"Failed to sell token: {e}")
 
     async def _withdraw_profits(self, amount_sol: float) -> bool:
-        """수익분 즉시 출금 (Phantom 지갑으로)"""
+        """수익분 즉시 출금 (Phantom 지갑으로) - Solana SOL 전송"""
+        from solders.keypair import Keypair
+        from solders.pubkey import Pubkey
+        from solders.system_program import transfer, TransferParams
+        from solders.message import MessageV0
+        from solders.transaction import VersionedTransaction
+        from solana.rpc.async_api import AsyncClient
+
         try:
             # 출금 주소 (Phantom Wallet)
             withdraw_address = os.environ.get("PHANTOM_PROFIT_WALLET") or os.environ.get("PHANTOM_WALLET_A")
@@ -521,12 +711,49 @@ class PumpSniperBot:
                 logger.info(f"[MOCK] Would withdraw {amount_sol:.3f} SOL to {withdraw_address}")
                 return True
 
-            # 실제 Solana 출금 로직 (simplified - 실제 구현 필요)
-            # TODO: Solana RPC를 통한 실제 출금 트랜잭션
-            logger.info(f"Initiating withdrawal: {amount_sol:.3f} SOL to {withdraw_address}")
+            # Private key 로드
+            private_key = os.environ.get("SOLANA_PRIVATE_KEY")
+            if not private_key:
+                logger.error("SOLANA_PRIVATE_KEY not set")
+                return False
 
-            # 출금 성공으로 간주 (실제 구현 시 트랜잭션 확인 필요)
-            return True
+            keypair = Keypair.from_base58_string(private_key)
+
+            # Solana RPC 연결
+            helius_url = os.environ.get("HELIUS_RPC_URL")
+            if not helius_url:
+                logger.error("HELIUS_RPC_URL not set")
+                return False
+
+            async with AsyncClient(helius_url) as client:
+                # 최신 blockhash 조회
+                bh_resp = await client.get_latest_blockhash()
+                blockhash = bh_resp.value.blockhash
+
+                # 전송 instruction 생성
+                ix = transfer(
+                    TransferParams(
+                        from_pubkey=keypair.pubkey(),
+                        to_pubkey=Pubkey.from_string(withdraw_address),
+                        lamports=int(amount_sol * 1e9)
+                    )
+                )
+
+                # 트랜잭션 생성 및 서명
+                msg = MessageV0.try_compile(
+                    keypair.pubkey(),
+                    [ix],
+                    [],
+                    blockhash
+                )
+                tx = VersionedTransaction(msg, [keypair])
+
+                # 전송
+                result = await client.send_raw_transaction(bytes(tx))
+                signature = result.value
+                logger.info(f"Withdrawal tx sent: {signature}")
+
+                return True
 
         except Exception as e:
             logger.error(f"Withdrawal failed: {e}")

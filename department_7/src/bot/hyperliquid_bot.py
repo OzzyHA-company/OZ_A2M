@@ -184,8 +184,21 @@ class HyperliquidMarketMakerBot:
             # Info API 연결 (읽기 전용)
             self.info = Info()
 
-            # Exchange API 연결 (거래용) - 프라이빗 키 필요
-            # TODO: 프라이빗 키 관리 구현
+            # Exchange API 연결 (거래용) - 프라이빗 키 로드
+            private_key = os.environ.get("METAMASK_PRIVATE_KEY")
+            if private_key and HYPERLIQUID_AVAILABLE:
+                try:
+                    from eth_account import Account
+                    eth_wallet = Account.from_key(private_key)
+                    self.exchange = Exchange(wallet=eth_wallet, base_url=None)
+                    logger.info(f"Hyperliquid Exchange connected (wallet: {self.wallet_address[:10]}...)")
+                except Exception as e:
+                    logger.warning(f"Exchange init failed: {e}, running info-only mode")
+                    self.exchange = None
+            else:
+                logger.warning("METAMASK_PRIVATE_KEY not set, running info-only mode")
+                self.exchange = None
+
             logger.info("Hyperliquid live mode initialized")
             self.status = HyperliquidStatus.RUNNING
 
@@ -247,9 +260,83 @@ class HyperliquidMarketMakerBot:
             raise
 
     async def _run_live_loop(self):
-        """실제 거래소 루프"""
-        # TODO: 실제 Hyperliquid 거래 로직 구현
-        pass
+        """실제 거래소 루프 - 마켓메이커 주문 관리 (30초 주기)"""
+        coin = self.symbol.replace("-PERP", "")
+        try:
+            if self.info and self.wallet_address:
+                # 계좌 상태 조회
+                user_state = self.info.user_state(self.wallet_address)
+                margin_summary = user_state.get("marginSummary", {})
+                account_value = float(margin_summary.get("accountValue", 0))
+                if account_value > 0:
+                    self._live_balance = account_value
+                    logger.debug(f"Hyperliquid account value: ${account_value:.2f}")
+
+            # 기존 open_orders 취소
+            if self.exchange and self.open_orders:
+                try:
+                    cancels = [{"coin": coin, "oid": int(oid)} for oid in list(self.open_orders.keys())]
+                    self.exchange.bulk_cancel(cancels)
+                    self.open_orders.clear()
+                    logger.debug(f"Cancelled {len(cancels)} existing orders")
+                except Exception as e:
+                    logger.debug(f"Cancel orders error: {e}")
+                    self.open_orders.clear()
+
+            # L2 스냅샷으로 중간 가격 조회
+            if self.info and self.exchange:
+                try:
+                    l2 = self.info.l2_snapshot(coin)
+                    bid_levels = l2.get("levels", [[], []])[0]
+                    ask_levels = l2.get("levels", [[], []])[1]
+
+                    if not bid_levels or not ask_levels:
+                        logger.debug("Empty L2 snapshot, skipping order placement")
+                        await asyncio.sleep(30)
+                        return
+
+                    best_bid = float(bid_levels[0]["px"])
+                    best_ask = float(ask_levels[0]["px"])
+                    mid = (best_bid + best_ask) / 2
+
+                    # 스프레드 적용 (base_spread_bps의 절반씩 양쪽)
+                    half_spread = mid * (self.base_spread_bps / 20000)
+                    bid_px = round(mid - half_spread, 1)
+                    ask_px = round(mid + half_spread, 1)
+
+                    # 주문 크기: 자본의 10% (최소 0.001 SOL)
+                    sz = round(self.capital * 0.1 / mid, 3)
+                    if sz < 0.001:
+                        logger.warning(f"Order size too small: {sz} SOL, skipping")
+                        await asyncio.sleep(30)
+                        return
+
+                    # 매수 호가 (Add-Liquidity-Only = maker 수수료)
+                    bid_result = self.exchange.order(coin, True, sz, bid_px, {"limit": {"tif": "Alo"}})
+                    if bid_result.get("status") == "ok":
+                        statuses = bid_result.get("response", {}).get("data", {}).get("statuses", [])
+                        if statuses and "resting" in statuses[0]:
+                            oid = str(statuses[0]["resting"]["oid"])
+                            self.open_orders[oid] = "bid"
+
+                    # 매도 호가
+                    ask_result = self.exchange.order(coin, False, sz, ask_px, {"limit": {"tif": "Alo"}})
+                    if ask_result.get("status") == "ok":
+                        statuses = ask_result.get("response", {}).get("data", {}).get("statuses", [])
+                        if statuses and "resting" in statuses[0]:
+                            oid = str(statuses[0]["resting"]["oid"])
+                            self.open_orders[oid] = "ask"
+
+                    self.total_trades += 1
+                    logger.info(f"MM orders: bid={bid_px} ask={ask_px} sz={sz} SOL (mid={mid:.2f})")
+
+                except Exception as e:
+                    logger.error(f"Order placement error: {e}")
+
+        except Exception as e:
+            logger.debug(f"Hyperliquid live loop error: {e}")
+
+        await asyncio.sleep(30)
 
     async def _run_mock_loop(self):
         """Mock 모드 루프"""

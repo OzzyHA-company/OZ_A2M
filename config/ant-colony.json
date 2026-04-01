@@ -1,0 +1,33 @@
+{
+  "colony": {
+    "name": "OZ_A2M_Trading_Colony",
+    "queen": {
+      "role": "strategy",
+      "llm": "gemini-pro",
+      "max_concurrent_tasks": 10
+    },
+    "scouts": {
+      "count": 5,
+      "role": "opportunity_detection",
+      "markets": ["BTC", "ETH", "SOL"]
+    },
+    "workers": {
+      "count": 10,
+      "role": "execution",
+      "strategies": ["grid", "dca", "arbitrage"]
+    },
+    "soldiers": {
+      "count": 3,
+      "role": "risk_management",
+      "checks": ["balance", "drawdown", "volatility"]
+    }
+  },
+  "pheromone": {
+    "decay_time": "10m",
+    "shared_storage": true
+  },
+  "nest": {
+    "atomic_operations": true,
+    "cross_process_safe": true
+  }
+}

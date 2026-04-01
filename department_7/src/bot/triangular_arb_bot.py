@@ -260,21 +260,42 @@ class TriangularArbBot:
             f"자본: ${self.capital}"
         )
 
+    def _normalize_precision(self, precision: float) -> int:
+        """
+        거래소 precision 값을 정수 소수점 자리수로 변환
+        CCXT는 두 가지 형식을 반환할 수 있음:
+        - 소수점 자리수: 2 (예: 0.01 단위)
+        - 스텝 크기: 0.01 (예: 0.01 단위)
+        """
+        try:
+            if precision is None:
+                return 2
+            p = float(precision)
+            if p < 1:
+                import math
+                return max(0, int(-math.log10(p)))
+            else:
+                return max(0, int(p))
+        except Exception:
+            return 2
+
     def _amount_to_precision(self, symbol: str, amount: float) -> float:
         """수량을 거래소 정밀도에 맞게 조정"""
         if symbol in self.market_info:
-            precision = self.market_info[symbol]["precision"].get("amount", 6)
+            raw_precision = self.market_info[symbol]["precision"].get("amount", 6)
         else:
-            precision = 6
+            raw_precision = 6
+        precision = self._normalize_precision(raw_precision)
         quantizer = Decimal(10) ** -Decimal(precision)
         return float(Decimal(str(amount)).quantize(quantizer, rounding=ROUND_DOWN))
 
     def _price_to_precision(self, symbol: str, price: float) -> float:
         """가격을 거래소 정밀도에 맞게 조정"""
         if symbol in self.market_info:
-            precision = self.market_info[symbol]["precision"].get("price", 2)
+            raw_precision = self.market_info[symbol]["precision"].get("price", 2)
         else:
-            precision = 2
+            raw_precision = 2
+        precision = self._normalize_precision(raw_precision)
         quantizer = Decimal(10) ** -Decimal(precision)
         return float(Decimal(str(price)).quantize(quantizer, rounding=ROUND_DOWN))
 

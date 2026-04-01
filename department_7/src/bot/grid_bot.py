@@ -220,6 +220,20 @@ class BinanceGridBot:
             logger.warning(f"EventBus connection failed: {e}")
             self.event_bus = None
 
+        # 기존 주문 정리 (재시작 시 중복 방지) + 거래 권한 사전 체크
+        self._trade_permitted = True
+        try:
+            existing = await self.exchange.fetch_open_orders(self.symbol)
+            if existing:
+                await self.exchange.cancel_all_orders(self.symbol)
+                logger.info(f"Cancelled {len(existing)} existing orders before grid setup")
+        except ccxt.PermissionDenied as e:
+            logger.error(f"[{self.exchange_id.upper()}] API 거래 권한 없음: {e}")
+            logger.error(f"→ {self.exchange_id} API 키에 Spot Trade 권한 추가 필요")
+            self._trade_permitted = False
+        except Exception as e:
+            logger.warning(f"Failed to cancel existing orders: {e}")
+
         self.status = GridStatus.RUNNING
         logger.info(f"Grid bot initialized at price ${self.current_price:.2f}")
         logger.info(f"Grid range: ${self.grid_range_low:.2f} ~ ${self.grid_range_high:.2f}")
@@ -255,12 +269,39 @@ class BinanceGridBot:
             logger.error(f"Error calculating grid range: {e}")
             raise
 
+    def _normalize_precision(self, precision: float) -> int:
+        """
+        거래소 precision 값을 정수 소수점 자리수로 변환
+
+        CCXT는 두 가지 형식을 반환할 수 있음:
+        - 소수점 자리수: 2 (예: 0.01 단위)
+        - 스텝 크기: 0.01 (예: 0.01 단위)
+
+        Returns:
+            int: 소수점 자리수 (예: 2)
+        """
+        try:
+            if precision is None:
+                return 2
+            p = float(precision)
+            if p < 1:
+                # 스텝 크기 형식 (0.01, 0.0001 등)
+                # decimal_places = -log10(step_size)
+                import math
+                return max(0, int(-math.log10(p)))
+            else:
+                # 이미 소수점 자리수 형식
+                return max(0, int(p))
+        except Exception:
+            return 2
+
     def _amount_to_precision(self, amount: float) -> float:
         """수량을 거래소 정밀도에 맞게 조정"""
         try:
             if amount is None or amount <= 0:
                 return self.min_amount
-            precision = self.precision.get("amount", 6)
+            raw_precision = self.precision.get("amount", 6)
+            precision = self._normalize_precision(raw_precision)
             # 안전한 Decimal 변환
             try:
                 dec_amount = Decimal(str(float(amount)))
@@ -278,7 +319,8 @@ class BinanceGridBot:
         try:
             if price is None or price <= 0:
                 price = self.current_price if self.current_price > 0 else 50000.0
-            precision = self.precision.get("price", 2)
+            raw_precision = self.precision.get("price", 2)
+            precision = self._normalize_precision(raw_precision)
             quantizer = Decimal(10) ** -Decimal(precision)
             return float(Decimal(str(float(price))).quantize(quantizer, rounding=ROUND_DOWN))
         except Exception as e:
@@ -302,16 +344,15 @@ class BinanceGridBot:
         amount_per_grid_value = self.capital / self.grid_count
 
         if amount_per_grid_value < min_order_value:
-            # 자본이 부족하면 그리드 수 자동 조정
-            adjusted_grid_count = int(self.capital / min_order_value)
-            if adjusted_grid_count < 2:
-                adjusted_grid_count = 2  # 최소 2개 그리드
-
-            logger.warning(
-                f"Capital too low for {self.grid_count} grids. "
-                f"Adjusting to {adjusted_grid_count} grids."
-            )
-            self.grid_count = adjusted_grid_count
+            # 자본이 부족하면 그리드 수 자동 조정 (이미 조정된 경우 재조정 안 함)
+            adjusted_grid_count = max(2, int(self.capital / min_order_value))
+            if adjusted_grid_count != self.grid_count:
+                logger.warning(
+                    f"Capital too low for {self.grid_count} grids. "
+                    f"Adjusting to {adjusted_grid_count} grids."
+                )
+                self.grid_count = adjusted_grid_count
+                self._calculate_grid_range()  # 레벨 재계산
             amount_per_grid_value = self.capital / self.grid_count
 
         # 수량 계산 (NOTIONAL 제한 고려)
@@ -377,15 +418,42 @@ class BinanceGridBot:
             raise
 
     async def _place_initial_orders(self):
-        """초기 주문 배치"""
+        """초기 주문 배치 - 가용 잔고 기반으로 배치 가능한 주문만"""
+        if not getattr(self, '_trade_permitted', True):
+            logger.warning(f"[{self.exchange_id.upper()}] 거래 권한 없음 — 주문 배치 건너뜀")
+            return
+        try:
+            balance = await self.exchange.fetch_balance()
+            available_usdt = float(balance.get('USDT', {}).get('free', 0))
+            available_base = float(balance.get(self.symbol.split('/')[0], {}).get('free', 0))
+        except Exception as e:
+            logger.warning(f"Failed to fetch balance: {e}, using capital as estimate")
+            available_usdt = self.capital
+            available_base = 0.0
+
+        logger.info(f"Available USDT: ${available_usdt:.2f}, Base: {available_base:.6f}")
+
+        # 자본 한도: 설정 자본과 가용 잔고 중 작은 값
+        usdt_budget = min(available_usdt, self.capital)
+        spent_usdt = 0.0
+        spent_base = 0.0
         # 현재가보다 아래는 매수 주문, 위는 매도 주문
         for level, grid in self.grid_levels.items():
             if grid.price < self.current_price:
-                # 매수 주문
+                order_amount = self._calculate_order_amount(grid.price)
+                order_cost = order_amount * grid.price
+                if spent_usdt + order_cost > usdt_budget:
+                    logger.debug(f"Skipping buy at level {level}: budget exhausted (need ${order_cost:.2f}, remaining ${usdt_budget - spent_usdt:.2f})")
+                    continue
                 await self._place_buy_order(level)
+                spent_usdt += order_cost
             elif grid.price > self.current_price:
-                # 매도 주문
+                order_amount = self._calculate_order_amount(grid.price)
+                if spent_base + order_amount > available_base:
+                    logger.debug(f"Skipping sell at level {level}: insufficient base asset (need {order_amount:.4f}, remaining {available_base - spent_base:.4f})")
+                    continue
                 await self._place_sell_order(level)
+                spent_base += order_amount
 
     async def _place_buy_order(self, level: int):
         """매수 주문 배치"""

@@ -237,12 +237,39 @@ class BinanceDCABot:
             f"최소주문: ${self.min_notional * self.SAFETY_MARGIN:.2f}"
         )
 
+    def _normalize_precision(self, precision: float) -> int:
+        """
+        거래소 precision 값을 정수 소수점 자리수로 변환
+
+        CCXT는 두 가지 형식을 반환할 수 있음:
+        - 소수점 자리수: 2 (예: 0.01 단위)
+        - 스텝 크기: 0.01 (예: 0.01 단위)
+
+        Returns:
+            int: 소수점 자리수 (예: 2)
+        """
+        try:
+            if precision is None:
+                return 2
+            p = float(precision)
+            if p < 1:
+                # 스텝 크기 형식 (0.01, 0.0001 등)
+                # decimal_places = -log10(step_size)
+                import math
+                return max(0, int(-math.log10(p)))
+            else:
+                # 이미 소수점 자리수 형식
+                return max(0, int(p))
+        except Exception:
+            return 2
+
     def _amount_to_precision(self, amount: float) -> float:
         """수량을 거래소 정밀도에 맞게 조정"""
         try:
             if amount is None or amount <= 0:
                 return self.min_amount
-            precision = self.precision.get("amount", 6)
+            raw_precision = self.precision.get("amount", 6)
+            precision = self._normalize_precision(raw_precision)
             dec_amount = Decimal(str(float(amount)))
             quantizer = Decimal(10) ** -Decimal(precision)
             result = float(dec_amount.quantize(quantizer, rounding=ROUND_DOWN))
@@ -256,7 +283,8 @@ class BinanceDCABot:
         try:
             if price is None or price <= 0:
                 price = self.current_price if self.current_price > 0 else 50000.0
-            precision = self.precision.get("price", 2)
+            raw_precision = self.precision.get("price", 2)
+            precision = self._normalize_precision(raw_precision)
             quantizer = Decimal(10) ** -Decimal(precision)
             return float(Decimal(str(float(price))).quantize(quantizer, rounding=ROUND_DOWN))
         except Exception as e:
@@ -380,6 +408,26 @@ class BinanceDCABot:
     async def _initial_buy(self):
         """초기 매수"""
         try:
+            # 실제 잔고 확인 후 가용 USDT에 맞게 자본 조정
+            try:
+                balance = await self.exchange.fetch_balance()
+                available_usdt = float(balance.get('USDT', {}).get('free', self.capital))
+                if available_usdt < self.capital:
+                    logger.warning(f"Available USDT ${available_usdt:.2f} < capital ${self.capital:.2f}, using available")
+                    effective_capital = available_usdt * 0.95  # 5% 여유
+                else:
+                    effective_capital = self.capital
+            except Exception:
+                effective_capital = self.capital
+
+            if effective_capital < self.min_notional:
+                logger.warning(f"Insufficient USDT for DCA initial buy (${effective_capital:.2f} < ${self.min_notional:.2f})")
+                self.position = None
+                return
+
+            saved_capital = self.capital
+            self.capital = effective_capital
+
             # 임시 포지션 생성 (수량 계산용)
             self.position = DCAPosition(
                 entry_price=self.current_price,
@@ -389,6 +437,7 @@ class BinanceDCABot:
             )
 
             amount = self._calculate_position_amount()
+            self.capital = saved_capital
 
             # 주문 유효성 검사
             if not self._validate_order(amount, self.current_price):
