@@ -1,0 +1,17 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Debug files
+debug/
+*.log
+
+# Sensitive files
+*.enc
+*.salt
+config.json.backup*
+
+# Environment
+.env
