@@ -1,0 +1,18 @@
+[Unit]
+Description=OZ_A2M Real-time Trading Dashboard
+After=network.target redis.service
+
+[Service]
+Type=simple
+User=ozzy-claw
+WorkingDirectory=/home/ozzy-claw/OZ_A2M/dashboard
+Environment=PATH=/usr/local/bin:/usr/bin
+Environment=PYTHONPATH=/home/ozzy-claw/OZ_A2M/dashboard
+ExecStart=/usr/bin/python3 /home/ozzy-claw/OZ_A2M/dashboard/main.py
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

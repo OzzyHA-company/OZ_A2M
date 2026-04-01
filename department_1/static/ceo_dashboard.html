@@ -388,6 +388,76 @@ body{background:var(--background);color:var(--text-primary);font-family:'Rajdhan
     </div>
   </div>
 
+    <!-- AI Brain: pi-mono + Ant-Colony + Jito -->
+    <div class="card" style="margin-top:12px;border:1px solid var(--neon-purple);">
+      <div class="card-title" style="color:var(--neon-purple);">
+        <span class="dot" style="background:var(--neon-purple);"></span>
+        AI Brain (pi-mono + Ant-Colony + Jito MEV)
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:16px;">
+        <!-- pi-mono Status -->
+        <div style="padding:16px;background:var(--card-bg);border-radius:8px;border:1px solid var(--card-border);">
+          <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px;">
+            <span style="font-size:24px;">🧠</span>
+            <span style="font-weight:600;">pi-mono</span>
+            <span id="pimono-status" style="margin-left:auto;"><span class="status-badge active">ACTIVE</span></span>
+          </div>
+          <div style="font-size:12px;color:var(--text-secondary);margin-bottom:4px;">Model</div>
+          <div id="pimono-model" style="font-size:14px;font-weight:500;margin-bottom:8px;">gemini-2.5-flash</div>
+          <div style="font-size:12px;color:var(--text-secondary);margin-bottom:4px;">Session</div>
+          <div id="pimono-session" style="font-size:12px;">Valid until: 2026-04-08</div>
+        </div>
+
+        <!-- Ant-Colony Status -->
+        <div style="padding:16px;background:var(--card-bg);border-radius:8px;border:1px solid var(--card-border);">
+          <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px;">
+            <span style="font-size:24px;">🐜</span>
+            <span style="font-weight:600;">Ant-Colony</span>
+            <span id="ant-total" style="margin-left:auto;font-size:18px;font-weight:700;color:var(--neon-cyan);">19</span>
+          </div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;font-size:12px;">
+            <div style="padding:8px;background:rgba(0,0,0,0.2);border-radius:4px;">
+              <div style="color:var(--text-secondary);">Queen</div>
+              <div id="ant-queen" style="font-weight:500;">1 (Strategy)</div>
+            </div>
+            <div style="padding:8px;background:rgba(0,0,0,0.2);border-radius:4px;">
+              <div style="color:var(--text-secondary);">Scouts</div>
+              <div id="ant-scouts">5 (Explore)</div>
+            </div>
+            <div style="padding:8px;background:rgba(0,0,0,0.2);border-radius:4px;">
+              <div style="color:var(--text-secondary);">Workers</div>
+              <div id="ant-workers">10 (Execute)</div>
+            </div>
+            <div style="padding:8px;background:rgba(0,0,0,0.2);border-radius:4px;">
+              <div style="color:var(--text-secondary);">Soldiers</div>
+              <div id="ant-soldiers">3 (Protect)</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Jito MEV Status -->
+        <div style="padding:16px;background:var(--card-bg);border-radius:8px;border:1px solid var(--card-border);">
+          <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px;">
+            <span style="font-size:24px;">⚡</span>
+            <span style="font-weight:600;">Jito MEV</span>
+          </div>
+          <div style="margin-bottom:12px;">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">
+              <span style="font-size:12px;color:var(--text-secondary);">Shredstream</span>
+              <span id="jito-shredstream"><span class="status-badge active">ACTIVE</span></span>
+            </div>
+            <div style="font-size:11px;color:var(--neon-cyan);" id="jito-txrate">10,000+ TX/s</div>
+          </div>
+          <div>
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">
+              <span style="font-size:12px;color:var(--text-secondary);">Block Engine</span>
+              <span id="jito-blockengine"><span class="status-badge active">ACTIVE</span></span>
+            </div>
+            <div style="font-size:11px;color:var(--text-muted);">MEV Protection: Enabled</div>
+          </div>
+        </div>
+      </div>
+    </div>
   <!-- TAB 2: D1 관제탑 + 외부탐색 - 데이터수집 (기존 intel 확장) -->
   <div id="tab-collection" class="tab">
     <div class="grid-2">
@@ -2686,6 +2756,64 @@ function updateNextFunding() {
   if (elem) elem.textContent = nextFunding;
 }
 setInterval(updateNextFunding, 60000);
+  // AI Brain (pi-mono + Ant-Colony + Jito) 상태 업데이트
+  async function updateAIBrainStatus() {
+    try {
+      const response = await fetch('/api/ai-brain/status');
+      const data = await response.json();
+
+      // pi-mono 상태
+      const piMonoStatus = document.getElementById('pimono-status');
+      const piMonoModel = document.getElementById('pimono-model');
+      const piMonoSession = document.getElementById('pimono-session');
+
+      if (piMonoStatus) {
+        const status = data.pi_mono?.status || 'unknown';
+        piMonoStatus.innerHTML = `<span class="status-badge ${status}">${status.toUpperCase()}</span>`;
+      }
+      if (piMonoModel) piMonoModel.textContent = data.pi_mono?.model || 'gemini-2.5-flash';
+      if (piMonoSession) {
+        const expires = data.pi_mono?.expires_at || '2026-04-08';
+        piMonoSession.textContent = `Valid until: ${expires}`;
+      }
+
+      // Ant-Colony 상태
+      const antTotal = document.getElementById('ant-total');
+      const antQueen = document.getElementById('ant-queen');
+      const antScouts = document.getElementById('ant-scouts');
+      const antWorkers = document.getElementById('ant-workers');
+      const antSoldiers = document.getElementById('ant-soldiers');
+
+      if (antTotal) antTotal.textContent = data.ant_colony?.total_agents || 19;
+      if (antQueen) antQueen.textContent = '1 (Strategy)';
+      if (antScouts) antScouts.textContent = `${data.ant_colony?.scouts?.count || 5} (Explore)`;
+      if (antWorkers) antWorkers.textContent = `${data.ant_colony?.workers?.count || 10} (Execute)`;
+      if (antSoldiers) antSoldiers.textContent = `${data.ant_colony?.soldiers?.count || 3} (Protect)`;
+
+      // Jito MEV 상태
+      const jitoShredstream = document.getElementById('jito-shredstream');
+      const jitoBlockEngine = document.getElementById('jito-blockengine');
+      const jitoTxRate = document.getElementById('jito-txrate');
+
+      if (jitoShredstream) {
+        const ssStatus = data.jito_mev?.shredstream?.status || 'inactive';
+        jitoShredstream.innerHTML = `<span class="status-badge ${ssStatus}">${ssStatus.toUpperCase()}</span>`;
+      }
+      if (jitoBlockEngine) {
+        const beStatus = data.jito_mev?.block_engine?.status || 'inactive';
+        jitoBlockEngine.innerHTML = `<span class="status-badge ${beStatus}">${beStatus.toUpperCase()}</span>`;
+      }
+      if (jitoTxRate) jitoTxRate.textContent = data.jito_mev?.shredstream?.tx_rate || '10,000+ TX/s';
+
+    } catch (error) {
+      console.error('AI Brain status update error:', error);
+    }
+  }
+
+  // AI Brain 상태 주기적 업데이트 (5초마다)
+  setInterval(updateAIBrainStatus, 5000);
+  // 초기 로드
+  updateAIBrainStatus();
 </script>
 
 </body>

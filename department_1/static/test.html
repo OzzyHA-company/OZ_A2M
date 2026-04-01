@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>OZ_A2M Test</title>
+    <style>
+        body { background: #0a0e14; color: #e6edf3; font-family: sans-serif; padding: 20px; }
+        .card { background: #1c2128; border: 1px solid #30363d; border-radius: 8px; padding: 16px; margin: 10px 0; }
+        .value { font-size: 24px; font-weight: bold; color: #00d084; }
+        .error { color: #ff4757; }
+        pre { background: #151b23; padding: 10px; border-radius: 4px; overflow-x: auto; }
+    </style>
+</head>
+<body>
+    <h1>OZ_A2M 대시보드 테스트</h1>
+    
+    <div class="card">
+        <h3>시스템 상태</h3>
+        <div id="status">로딩중...</div>
+    </div>
+    
+    <div class="card">
+        <h3>수익 현황</h3>
+        <div id="profit">로딩중...</div>
+    </div>
+    
+    <div class="card">
+        <h3>봇 목록</h3>
+        <div id="bots">로딩중...</div>
+    </div>
+    
+    <div class="card">
+        <h3>거래소 잔액</h3>
+        <div id="balances">로딩중...</div>
+    </div>
+
+    <script>
+        async function loadData() {
+            try {
+                // 1. 시스템 상태
+                const statusRes = await fetch('/api/status');
+                const status = await statusRes.json();
+                document.getElementById('status').innerHTML = `
+                    총 자본: <span class="value">$${status.total_capital}</span><br>
+                    실행 중: ${status.running_bots}/${status.total_bots} 봇<br>
+                    출금 가능: $${status.withdrawable.toFixed(2)}
+                `;
+                
+                // 2. 수익 현황
+                const profitRes = await fetch('/api/profit');
+                const profit = await profitRes.json();
+                document.getElementById('profit').innerHTML = `
+                    총 수익: <span class="value">+$${profit.total.toFixed(2)}</span><br>
+                    <pre>${JSON.stringify(profit.by_bot, null, 2)}</pre>
+                `;
+                
+                // 3. 봇 목록
+                const botsRes = await fetch('/api/bots');
+                const bots = await botsRes.json();
+                let botsHtml = '<table border="1" style="width:100%;border-collapse:collapse;">';
+                botsHtml += '<tr><th>봇</th><th>거래소</th><th>자본</th><th>수익</th><th>거래수</th></tr>';
+                bots.forEach(bot => {
+                    botsHtml += `<tr>
+                        <td>${bot.bot_id}</td>
+                        <td>${bot.exchange}</td>
+                        <td>$${bot.capital}</td>
+                        <td>$${bot.pnl.toFixed(2)}</td>
+                        <td>${bot.trades}</td>
+                    </tr>`;
+                });
+                botsHtml += '</table>';
+                document.getElementById('bots').innerHTML = botsHtml;
+                
+                // 4. 거래소 잔액
+                const balRes = await fetch('/api/exchange-balances');
+                const bal = await balRes.json();
+                document.getElementById('balances').innerHTML = `
+                    <pre>${JSON.stringify(bal.balances, null, 2)}</pre>
+                `;
+                
+            } catch (e) {
+                document.body.innerHTML += `<div class="card error">에러: ${e.message}</div>`;
+            }
+        }
+        
+        loadData();
+        setInterval(loadData, 5000);
+    </script>
+</body>
+</html>

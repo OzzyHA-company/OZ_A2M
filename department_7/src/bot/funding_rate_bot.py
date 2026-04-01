@@ -195,7 +195,7 @@ class FundingRateBot:
             if exchange_id == "binance":
                 config["options"] = {"defaultType": "spot"}
             elif exchange_id == "bybit":
-                config["options"] = {"defaultType": "spot"}
+                config["options"] = {"defaultType": "unified"}
 
             exchange = exchange_class(config)
 

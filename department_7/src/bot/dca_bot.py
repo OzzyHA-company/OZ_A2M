@@ -39,6 +39,16 @@ from lib.messaging.event_bus import EventBus, get_event_bus
 from occore.pnl.calculator import get_calculator
 from occore.pnl.models import PositionSide
 
+# Ant-Colony Nest 연동
+try:
+    import sys
+    from pathlib import Path
+    sys.path.insert(0, str(Path.home() / ".openclaw" / "skills" / "oz-a2m-ant-colony-nest" / "scripts"))
+    from bot_adapter import BotAdapter
+    ANT_COLONY_AVAILABLE = True
+except ImportError:
+    ANT_COLONY_AVAILABLE = False
+
 logger = get_logger(__name__)
 
 
@@ -138,6 +148,20 @@ class BinanceDCABot:
 
         # PnL Calculator
         self.pnl_calculator = get_calculator()
+
+        # Ant-Colony Nest Adapter
+        self.nest = None
+        if ANT_COLONY_AVAILABLE:
+            self.nest = BotAdapter(
+                bot_id=bot_id,
+                bot_type="dca",
+                config={
+                    "capital": capital,
+                    "exchange": exchange_id,
+                    "symbol": symbol,
+                    "sandbox": sandbox
+                }
+            )
 
         # Telegram
         self.telegram_bot_token = os.environ.get("TELEGRAM_BOT_TOKEN")
@@ -352,6 +376,14 @@ class BinanceDCABot:
         """메인 루프"""
         try:
             await self.initialize()
+
+            # Ant-Colony Nest 등록
+            if self.nest:
+                try:
+                    await self.nest.register()
+                    logger.info(f"🐜 DCA Bot registered to Nest: {self.bot_id}")
+                except Exception as e:
+                    logger.warning(f"Failed to register to Nest: {e}")
         except Exception as e:
             logger.error(f"DCA bot initialization failed: {e}")
             self.status = DCAStatus.ERROR
@@ -472,6 +504,24 @@ class BinanceDCABot:
             self.last_trade_time = trade_time
             self._update_trades_today()
 
+            # Ant-Colony Nest에 거래 발행
+            if self.nest:
+                try:
+                    await self.nest.publish_trade({
+                        "side": "buy",
+                        "symbol": self.symbol,
+                        "amount": amount,
+                        "price": price,
+                        "cost": amount * price,
+                        "pnl": 0
+                    })
+                    await self.nest.update_status(
+                        pnl=self.total_pnl,
+                        trades=self.total_trades
+                    )
+                except Exception as e:
+                    logger.debug(f"Failed to publish to Nest: {e}")
+
             # 다음 DCA 가격 계산 (현재가 기준 -2%)
             self.next_dca_price = price * (1 - self.dca_drop_pct)
 
@@ -554,6 +604,24 @@ class BinanceDCABot:
             self.last_trade_time = trade_time
             self._update_trades_today()
 
+            # Ant-Colony Nest에 거래 발행
+            if self.nest:
+                try:
+                    await self.nest.publish_trade({
+                        "side": "buy",
+                        "symbol": self.symbol,
+                        "amount": amount,
+                        "price": price,
+                        "cost": amount * price,
+                        "pnl": 0
+                    })
+                    await self.nest.update_status(
+                        pnl=self.total_pnl,
+                        trades=self.total_trades
+                    )
+                except Exception as e:
+                    logger.debug(f"Failed to publish to Nest: {e}")
+
             # 다음 DCA 가격 계산
             self.next_dca_price = price * (1 - self.dca_drop_pct)
 
@@ -621,6 +689,24 @@ class BinanceDCABot:
             self.last_trade_time = trade_time
             self._update_trades_today()
             self.next_dca_price = None  # 포지션 종료 시 초기화
+
+            # Ant-Colony Nest에 거래 발행
+            if self.nest:
+                try:
+                    await self.nest.publish_trade({
+                        "side": "sell",
+                        "symbol": self.symbol,
+                        "amount": self.position.amount,
+                        "price": exit_price,
+                        "cost": self.position.amount * exit_price,
+                        "pnl": pnl
+                    })
+                    await self.nest.update_status(
+                        pnl=self.total_pnl,
+                        trades=self.total_trades
+                    )
+                except Exception as e:
+                    logger.debug(f"Failed to publish to Nest: {e}")
 
             logger.info(f"Take profit: Sold {self.position.amount} BTC @ ${exit_price:.2f}")
             logger.info(f"PnL: ${pnl:.2f} ({pnl_pct:.2f}%)")

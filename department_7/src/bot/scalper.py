@@ -31,6 +31,15 @@ from lib.core.logger import get_logger
 from lib.messaging.mqtt_client import MQTTClient, MQTTConfig
 from lib.messaging.event_bus import EventBus, EventType, EventPriority, get_event_bus
 
+# Ant-Colony Nest 연동
+try:
+    import sys
+    sys.path.insert(0, str(Path.home() / ".openclaw" / "skills" / "oz-a2m-ant-colony-nest" / "scripts"))
+    from bot_adapter import BotAdapter
+    ANT_COLONY_AVAILABLE = True
+except ImportError:
+    ANT_COLONY_AVAILABLE = False
+
 logger = get_logger(__name__)
 
 
@@ -148,6 +157,20 @@ class BybitScalpingBot:
         self.mqtt_host = mqtt_host
         self.mqtt_port = mqtt_port
 
+        # Ant-Colony Nest Adapter
+        self.nest = None
+        if ANT_COLONY_AVAILABLE:
+            self.nest = BotAdapter(
+                bot_id=bot_id,
+                bot_type="scalper",
+                config={
+                    "capital": capital,
+                    "exchange": exchange_id,
+                    "symbol": symbol,
+                    "sandbox": sandbox
+                }
+            )
+
         # EventBus
         self.event_bus: Optional[EventBus] = None
         self.enable_kafka = False
@@ -192,13 +215,20 @@ class BybitScalpingBot:
 
         # 거래소 설정
         exchange_class = getattr(ccxt, self.exchange_id)
+
+        # Bybit는 Unified Trading Account(UTA) 사용
+        if self.exchange_id.lower() == "bybit":
+            default_type = "unified"
+        else:
+            default_type = "spot"
+
         config = {
             "apiKey": api_key,
             "secret": api_secret,
             "sandbox": self.sandbox,
             "enableRateLimit": True,
             "options": {
-                "defaultType": "spot"
+                "defaultType": default_type
             }
         }
         self.exchange = exchange_class(config)
@@ -253,6 +283,14 @@ class BybitScalpingBot:
         """봇 메인 루프"""
         try:
             await self.initialize()
+
+            # Ant-Colony Nest 등록
+            if self.nest:
+                try:
+                    await self.nest.register()
+                    logger.info(f"🐜 Scalper registered to Nest: {self.bot_id}")
+                except Exception as e:
+                    logger.warning(f"Failed to register to Nest: {e}")
         except Exception as e:
             logger.error(f"Bot initialization failed: {e}")
             self.state = BotState.ERROR
@@ -663,6 +701,24 @@ class BybitScalpingBot:
                 topic = f"trades/{self.bot_id}"
                 payload = json.dumps(trade.to_dict())
                 await self.mqtt.publish(topic, payload)
+
+            # Ant-Colony Nest에 거래 발행
+            if self.nest:
+                try:
+                    await self.nest.publish_trade({
+                        "side": trade.side,
+                        "symbol": trade.symbol,
+                        "amount": trade.amount,
+                        "price": trade.price,
+                        "cost": trade.amount * trade.price,
+                        "pnl": trade.pnl or 0
+                    })
+                    await self.nest.update_status(
+                        pnl=self.daily_pnl,
+                        trades=self.total_trades
+                    )
+                except Exception as e:
+                    logger.debug(f"Failed to publish to Nest: {e}")
         except Exception as e:
             logger.error(f"Error publishing trade: {e}")
 

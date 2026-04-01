@@ -39,6 +39,16 @@ from lib.messaging.event_bus import EventBus, get_event_bus
 from occore.pnl.calculator import ProfitCalculator, get_calculator
 from occore.pnl.models import PositionSide
 
+# Ant-Colony Nest 연동
+try:
+    import sys
+    sys.path.insert(0, str(Path.home() / ".openclaw" / "skills" / "oz-a2m-ant-colony-nest" / "scripts"))
+    from bot_adapter import BotAdapter
+    ANT_COLONY_AVAILABLE = True
+except ImportError:
+    ANT_COLONY_AVAILABLE = False
+    logger.warning("Ant-Colony Nest not available, running without data sync")
+
 logger = get_logger(__name__)
 
 
@@ -134,6 +144,20 @@ class BinanceGridBot:
         # PnL Calculator
         self.pnl_calculator = get_calculator()
 
+        # Ant-Colony Nest Adapter
+        self.nest = None
+        if ANT_COLONY_AVAILABLE:
+            self.nest = BotAdapter(
+                bot_id=bot_id,
+                bot_type="grid",
+                config={
+                    "capital": capital,
+                    "exchange": exchange_id,
+                    "symbol": symbol,
+                    "sandbox": sandbox
+                }
+            )
+
         # Telegram
         self.telegram_bot_token = os.environ.get("TELEGRAM_BOT_TOKEN")
         self.telegram_chat_id = os.environ.get("TELEGRAM_CHAT_ID")
@@ -177,12 +201,19 @@ class BinanceGridBot:
 
         # 거래소 설정
         exchange_class = getattr(ccxt, self.exchange_id)
+
+        # Bybit는 Unified Trading Account(UTA) 사용
+        if self.exchange_id.lower() == "bybit":
+            default_type = "unified"
+        else:
+            default_type = "spot"
+
         config = {
             "apiKey": api_key,
             "secret": api_secret,
             "sandbox": self.sandbox,
             "enableRateLimit": True,
-            "options": {"defaultType": "spot"}
+            "options": {"defaultType": default_type}
         }
         self.exchange = exchange_class(config)
 
@@ -247,6 +278,14 @@ class BinanceGridBot:
             f"자본: ${self.capital}\n"
             f"최소주문: ${self.min_notional * self.SAFETY_MARGIN:.2f}"
         )
+
+        # Ant-Colony Nest 등록
+        if self.nest:
+            try:
+                await self.nest.register()
+                logger.info(f"🐜 Registered to Ant-Colony Nest: {self.bot_id}")
+            except Exception as e:
+                logger.warning(f"Failed to register to Nest: {e}")
 
     def _calculate_grid_range(self):
         """그리드 범위 계산"""
@@ -561,6 +600,24 @@ class BinanceGridBot:
             f"수량: {amount:.6f} BTC"
         )
 
+        # Ant-Colony Nest에 거래 발행
+        if self.nest:
+            try:
+                await self.nest.publish_trade({
+                    "side": "buy",
+                    "symbol": self.symbol,
+                    "amount": amount,
+                    "price": grid.price,
+                    "cost": amount * grid.price,
+                    "pnl": 0  # 매수는 아직 손익 없음
+                })
+                await self.nest.update_status(
+                    pnl=self.total_pnl,
+                    trades=self.total_trades
+                )
+            except Exception as e:
+                logger.debug(f"Failed to publish to Nest: {e}")
+
         if self.on_trade:
             self.on_trade(trade)
 
@@ -603,6 +660,24 @@ class BinanceGridBot:
             f"수량: {amount:.6f} BTC\n"
             f"차익: ${grid_profit:.4f}"
         )
+
+        # Ant-Colony Nest에 거래 발행
+        if self.nest:
+            try:
+                await self.nest.publish_trade({
+                    "side": "sell",
+                    "symbol": self.symbol,
+                    "amount": amount,
+                    "price": grid.price,
+                    "cost": amount * grid.price,
+                    "pnl": grid_profit
+                })
+                await self.nest.update_status(
+                    pnl=self.total_pnl,
+                    trades=self.total_trades
+                )
+            except Exception as e:
+                logger.debug(f"Failed to publish to Nest: {e}")
 
         if self.on_trade:
             self.on_trade(trade)

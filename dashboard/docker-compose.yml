@@ -1,0 +1,19 @@
+version: '3.8'
+
+services:
+  oz-a2m-dashboard:
+    build: .
+    container_name: oz-a2m-dashboard
+    ports:
+      - "8083:8083"
+    environment:
+      - REDIS_HOST=host.docker.internal
+      - REDIS_PORT=6379
+      - TZ=Asia/Seoul
+    network_mode: host
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8083/api/status"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
