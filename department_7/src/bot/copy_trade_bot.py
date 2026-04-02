@@ -123,6 +123,11 @@ class GMGNCopyBot:
         self.telegram_bot_token = os.environ.get("TELEGRAM_BOT_TOKEN")
         self.telegram_chat_id = os.environ.get("TELEGRAM_CHAT_ID")
 
+        # Solana RPC (Ankr 우선, fallback: Helius → 공식 RPC)
+        self.ankr_http_url = os.environ.get("ANKR_SOLANA_HTTP_URL")
+        self.helius_http_url = os.environ.get("HELIUS_RPC_URL")
+        self.helius_api_key = os.environ.get("HELIUS_API_KEY")
+
         # 통계
         self.total_copies: int = 0
         self.successful_copies: int = 0
@@ -298,11 +303,17 @@ class GMGNCopyBot:
                 logger.warning("ANT_COLONY_API_KEY not set")
                 return []
 
-            helius_url = f"https://api.mainnet-beta.solana.com/v0/addresses/{wallet_address}/transactions"
+            # Ankr 우선, fallback: Helius → 공식 RPC
+            if self.ankr_http_url:
+                rpc_url = self.ankr_http_url
+            elif self.helius_http_url:
+                rpc_url = f"{self.helius_http_url}/v0/addresses/{wallet_address}/transactions"
+            else:
+                rpc_url = f"https://api.mainnet-beta.solana.com/v0/addresses/{wallet_address}/transactions"
 
             async with aiohttp.ClientSession() as session:
                 params = {"api-key": api_key, "limit": 10}
-                async with session.get(helius_url, params=params) as resp:
+                async with session.get(rpc_url, params=params) as resp:
                     if resp.status != 200:
                         logger.warning(f"Helius API error: {resp.status}")
                         return []
@@ -475,12 +486,13 @@ class GMGNCopyBot:
             tx = VersionedTransaction.from_bytes(tx_bytes)
             signed_tx = VersionedTransaction(tx.message, [keypair])
 
-            helius_url = os.environ.get("SOLANA_RPC_URL") or os.environ.get("HELIUS_RPC_URL")
-            if not helius_url:
-                logger.error("SOLANA_RPC_URL / HELIUS_RPC_URL not set")
-                return
+            # Solana RPC (Ankr 우선)
+            rpc_url = self.ankr_http_url or self.helius_http_url or os.environ.get("SOLANA_RPC_URL")
+            if not rpc_url:
+                logger.error("No Solana RPC URL configured (ANKR_SOLANA_HTTP_URL or HELIUS_RPC_URL)")
+                return 0.0
 
-            async with AsyncClient(helius_url) as client:
+            async with AsyncClient(rpc_url) as client:
                 result = await client.send_raw_transaction(bytes(signed_tx))
                 signature = result.value
                 logger.info(f"Copy trade tx sent: {signature}")
@@ -577,12 +589,13 @@ class GMGNCopyBot:
             keypair = Keypair.from_base58_string(private_key)
 
             # Solana RPC 연결
-            helius_url = os.environ.get("SOLANA_RPC_URL") or os.environ.get("HELIUS_RPC_URL")
-            if not helius_url:
-                logger.error("SOLANA_RPC_URL / HELIUS_RPC_URL not set")
+            # Solana RPC (Ankr 우선)
+            rpc_url = self.ankr_http_url or self.helius_http_url or os.environ.get("SOLANA_RPC_URL")
+            if not rpc_url:
+                logger.error("No Solana RPC URL configured (ANKR_SOLANA_HTTP_URL or HELIUS_RPC_URL)")
                 return False
 
-            async with AsyncClient(helius_url) as client:
+            async with AsyncClient(rpc_url) as client:
                 # 최신 blockhash
                 bh_resp = await client.get_latest_blockhash()
                 blockhash = bh_resp.value.blockhash

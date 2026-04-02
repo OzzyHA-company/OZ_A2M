@@ -130,21 +130,32 @@ class PumpSniperBot:
         self.telegram_bot_token = os.environ.get("TELEGRAM_BOT_TOKEN")
         self.telegram_chat_id = os.environ.get("TELEGRAM_CHAT_ID")
 
-        # QuickNode (HTTP + WSS URL 지원)
-        self.quicknode_http_url = os.environ.get("QUICKNODE_HTTP_URL")
-        self.quicknode_ws_url = os.environ.get("QUICKNODE_WSS_URL")
-        # WSS가 없으면 HTTP에서 변환
-        if not self.quicknode_ws_url and self.quicknode_http_url:
-            self.quicknode_ws_url = self.quicknode_http_url.replace("https://", "wss://")
+        # Solana RPC (Ankr 우선, fallback: Helius → 공식 RPC)
+        self.ankr_http_url = os.environ.get("ANKR_SOLANA_HTTP_URL")
+        self.ankr_ws_url = os.environ.get("ANKR_SOLANA_WSS_URL")
+        self.helius_http_url = os.environ.get("HELIUS_RPC_URL")
+        self.helius_ws_url = os.environ.get("HELIUS_WSS_URL")
+
+        # 우선순위: Ankr → Helius → 공식 RPC
+        if self.ankr_http_url:
+            self.solana_http_url = self.ankr_http_url
+            self.solana_ws_url = self.ankr_ws_url or self.ankr_http_url.replace("https://", "wss://")
+        elif self.helius_http_url:
+            self.solana_http_url = self.helius_http_url
+            self.solana_ws_url = self.helius_ws_url or self.helius_http_url.replace("https://", "wss://")
+        else:
+            # Fallback: Solana 공식 RPC (rate limit 주의)
+            self.solana_http_url = "https://api.mainnet-beta.solana.com"
+            self.solana_ws_url = "wss://api.mainnet-beta.solana.com"
 
         # Jito 파이프라인 (Data In: Shredstream, Data Out: Block Engine)
         self.jito_proxy: Optional[Any] = None
         self.jito_sender: Optional[Any] = None
         if JITO_AVAILABLE:
             self.jito_proxy = JitoShredstreamProxy()
-            self.jito_sender = JitoBlockEngineSender(
-                rpc_url=os.environ.get("HELIUS_RPC_URL", "https://api.mainnet-beta.solana.com")
-            )
+            # Jito Block Engine용 RPC (Ankr 우선)
+            jito_rpc = self.ankr_http_url or self.helius_http_url or "https://api.mainnet-beta.solana.com"
+            self.jito_sender = JitoBlockEngineSender(rpc_url=jito_rpc)
 
         # 통계
         self.tokens_detected: int = 0
@@ -173,7 +184,7 @@ class PumpSniperBot:
         """봇 초기화"""
         self.wallet_address = self._load_wallet()
 
-        if self.mock_mode or not self.quicknode_ws_url:
+        if self.mock_mode or not self.solana_ws_url:
             await self._initialize_mock()
         else:
             await self._initialize_live()
@@ -202,9 +213,9 @@ class PumpSniperBot:
                 # WebSocket 연결
                 import websockets
 
-                logger.info(f"Connecting to QuickNode WebSocket: {self.quicknode_ws_url}")
+                logger.info(f"Connecting to Solana WebSocket: {self.solana_ws_url}")
                 self.solana_ws = await websockets.connect(
-                    self.quicknode_ws_url,
+                    self.solana_ws_url,
                     ping_interval=20,
                     ping_timeout=10
                 )
@@ -223,12 +234,13 @@ class PumpSniperBot:
                 await self.solana_ws.send(json.dumps(subscribe_msg))
 
                 self.status = SniperStatus.RUNNING
-                logger.info("Pump.fun sniper live mode initialized (QuickNode)")
+                provider = "Ankr" if self.ankr_http_url else ("Helius" if self.helius_http_url else "Public RPC")
+                logger.info(f"Pump.fun sniper live mode initialized ({provider})")
 
                 # Jito Shredstream 파이프라인 시작 (Data In)
                 if self.jito_proxy:
                     asyncio.create_task(self.jito_proxy.start())
-                    logger.info("Jito Shredstream proxy started (QuickNode→AntColony pipeline)")
+                    logger.info("Jito Shredstream proxy started (AntColony pipeline)")
 
                 # 시작 알림
                 await self._send_telegram_notification(
@@ -240,7 +252,7 @@ class PumpSniperBot:
                 return
 
             except Exception as e:
-                logger.error(f"Failed to initialize QuickNode connection (attempt {attempt + 1}/{max_retries}): {e}")
+                logger.error(f"Failed to initialize WebSocket connection (attempt {attempt + 1}/{max_retries}): {e}")
                 if attempt < max_retries - 1:
                     retry_delay *= 2  # 지수 백오프
                 else:
@@ -571,13 +583,13 @@ class PumpSniperBot:
             tx = VersionedTransaction.from_bytes(tx_bytes)
             signed_tx = VersionedTransaction(tx.message, [keypair])
 
-            # Solana RPC로 전송
-            helius_url = os.environ.get("SOLANA_RPC_URL") or os.environ.get("HELIUS_RPC_URL")
-            if not helius_url:
-                logger.error("SOLANA_RPC_URL / HELIUS_RPC_URL not set")
+            # Solana RPC로 전송 (Ankr 우선)
+            rpc_url = self.ankr_http_url or self.helius_http_url or os.environ.get("SOLANA_RPC_URL")
+            if not rpc_url:
+                logger.error("No Solana RPC URL configured")
                 return 0.0
 
-            async with AsyncClient(helius_url) as client:
+            async with AsyncClient(rpc_url) as client:
                 result = await client.send_raw_transaction(
                     bytes(signed_tx),
                     opts={"skipPreflight": False, "preflightCommitment": "confirmed"}
@@ -743,13 +755,13 @@ class PumpSniperBot:
 
             keypair = Keypair.from_base58_string(private_key)
 
-            # Solana RPC 연결
-            helius_url = os.environ.get("SOLANA_RPC_URL") or os.environ.get("HELIUS_RPC_URL")
-            if not helius_url:
-                logger.error("SOLANA_RPC_URL / HELIUS_RPC_URL not set")
+            # Solana RPC 연결 (Ankr 우선)
+            rpc_url = self.ankr_http_url or self.helius_http_url or os.environ.get("SOLANA_RPC_URL")
+            if not rpc_url:
+                logger.error("No Solana RPC URL configured (ANKR_SOLANA_HTTP_URL or HELIUS_RPC_URL)")
                 return False
 
-            async with AsyncClient(helius_url) as client:
+            async with AsyncClient(rpc_url) as client:
                 # 최신 blockhash 조회
                 bh_resp = await client.get_latest_blockhash()
                 blockhash = bh_resp.value.blockhash
