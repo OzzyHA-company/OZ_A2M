@@ -123,8 +123,9 @@ class GMGNCopyBot:
         self.telegram_bot_token = os.environ.get("TELEGRAM_BOT_TOKEN")
         self.telegram_chat_id = os.environ.get("TELEGRAM_CHAT_ID")
 
-        # Solana RPC (Ankr 우선, fallback: Helius → 공식 RPC)
-        self.ankr_http_url = os.environ.get("ANKR_SOLANA_HTTP_URL")
+        # RPC 제공자 설정 (우선순위: Alchemy → Infura → Helius)
+        self.alchemy_http_url = os.environ.get("ALCHEMY_SOLANA_HTTP_URL")
+        self.infura_http_url = os.environ.get("INFURA_SOLANA_HTTP_URL")
         self.helius_http_url = os.environ.get("HELIUS_RPC_URL")
         self.helius_api_key = os.environ.get("HELIUS_API_KEY")
         self.helius_parse_url = os.environ.get("HELIUS_PARSE_TX_URL")
@@ -150,6 +151,16 @@ class GMGNCopyBot:
     def _load_wallet(self) -> Optional[str]:
         """.env에서 Phantom 지갑 주소 로드"""
         return os.environ.get("PHANTOM_WALLET_C")
+
+    def _get_best_rpc_url(self) -> Optional[str]:
+        """최선의 RPC URL 반환 (Alchemy → Infura → Helius → 공식 RPC)"""
+        if self.alchemy_http_url:
+            return self.alchemy_http_url
+        if self.infura_http_url:
+            return self.infura_http_url
+        if self.helius_http_url:
+            return self.helius_http_url
+        return os.environ.get("SOLANA_RPC_URL", "https://api.mainnet-beta.solana.com")
 
     def _load_tracked_wallets(self) -> List[str]:
         """추적할 스마트머니 지갑 목록"""
@@ -304,17 +315,11 @@ class GMGNCopyBot:
                 logger.warning("ANT_COLONY_API_KEY not set")
                 return []
 
-            # Ankr 우선, fallback: Helius → 공식 RPC
-            if self.ankr_http_url:
-                rpc_url = self.ankr_http_url
-            elif self.helius_http_url:
-                rpc_url = f"{self.helius_http_url}/v0/addresses/{wallet_address}/transactions"
-            else:
-                rpc_url = f"https://api.mainnet-beta.solana.com/v0/addresses/{wallet_address}/transactions"
+            helius_url = f"https://api.mainnet-beta.solana.com/v0/addresses/{wallet_address}/transactions"
 
             async with aiohttp.ClientSession() as session:
                 params = {"api-key": api_key, "limit": 10}
-                async with session.get(rpc_url, params=params) as resp:
+                async with session.get(helius_url, params=params) as resp:
                     if resp.status != 200:
                         logger.warning(f"Helius API error: {resp.status}")
                         return []
@@ -487,11 +492,10 @@ class GMGNCopyBot:
             tx = VersionedTransaction.from_bytes(tx_bytes)
             signed_tx = VersionedTransaction(tx.message, [keypair])
 
-            # Solana RPC (Ankr 우선)
-            rpc_url = self.ankr_http_url or self.helius_http_url or os.environ.get("SOLANA_RPC_URL")
-            if not rpc_url:
-                logger.error("No Solana RPC URL configured (ANKR_SOLANA_HTTP_URL or HELIUS_RPC_URL)")
-                return 0.0
+            rpc_url = self._get_best_rpc_url()
+            if not helius_url:
+                logger.error("SOLANA_RPC_URL / HELIUS_RPC_URL not set")
+                return
 
             async with AsyncClient(rpc_url) as client:
                 result = await client.send_raw_transaction(bytes(signed_tx))
@@ -590,10 +594,9 @@ class GMGNCopyBot:
             keypair = Keypair.from_base58_string(private_key)
 
             # Solana RPC 연결
-            # Solana RPC (Ankr 우선)
-            rpc_url = self.ankr_http_url or self.helius_http_url or os.environ.get("SOLANA_RPC_URL")
-            if not rpc_url:
-                logger.error("No Solana RPC URL configured (ANKR_SOLANA_HTTP_URL or HELIUS_RPC_URL)")
+            rpc_url = self._get_best_rpc_url()
+            if not helius_url:
+                logger.error("SOLANA_RPC_URL / HELIUS_RPC_URL not set")
                 return False
 
             async with AsyncClient(rpc_url) as client:
