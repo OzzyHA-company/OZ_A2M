@@ -17,6 +17,53 @@ from datetime import datetime
 from dotenv import load_dotenv
 load_dotenv('/home/ozzy-claw/.ozzy-secrets/master.env', override=True)
 
+async def check_exchange_balance(exchange_id: str) -> dict:
+    """거래소 실시간 잔액 확인"""
+    try:
+        import ccxt.async_support as ccxt
+        import os
+        
+        api_key = os.environ.get(f"{exchange_id.upper()}_API_KEY")
+        api_secret = os.environ.get(f"{exchange_id.upper()}_API_SECRET")
+        
+        if not api_key or not api_secret:
+            return {'usdt_free': 0, 'error': 'API keys not found'}
+        
+        exchange_class = getattr(ccxt, exchange_id)
+        config = {
+            "apiKey": api_key,
+            "secret": api_secret,
+            "enableRateLimit": True,
+        }
+        if exchange_id.lower() == "bybit":
+            config["options"] = {"defaultType": "unified"}
+            
+        exchange = exchange_class(config)
+        await exchange.load_markets()
+        balance = await exchange.fetch_balance()
+        
+        usdt_free = float(balance.get('USDT', {}).get('free', 0))
+        sol_free = float(balance.get('SOL', {}).get('free', 0))
+        
+        # SOL 가격 조회
+        sol_price = 0
+        try:
+            ticker = await exchange.fetch_ticker('SOL/USDT')
+            sol_price = ticker.get('last', 0)
+        except:
+            pass
+        
+        await exchange.close()
+        
+        return {
+            'usdt_free': usdt_free,
+            'sol_free': sol_free,
+            'sol_value_usd': sol_free * sol_price,
+            'total_value_usd': usdt_free + (sol_free * sol_price)
+        }
+    except Exception as e:
+        return {'usdt_free': 0, 'error': str(e)}
+
 project_root = Path(__file__).parent.parent.parent.parent
 sys.path.insert(0, str(project_root))
 
@@ -358,6 +405,39 @@ async def run_all():
     print("="*60)
     print(f"시작 시간: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     print(f"총 봇 수: {len(BOT_CONFIGS)}")
+    print("="*60 + "\n")
+
+    # 실시간 잔액 확인 및 자본 자동 조정
+    print("💰 거래소 실시간 잔액 확인 중...")
+    print("-"*60)
+    
+    binance_balance = await check_exchange_balance('binance')
+    bybit_balance = await check_exchange_balance('bybit')
+    
+    print(f"[Binance] USDT: ${binance_balance.get('usdt_free', 0):.2f} | SOL: {binance_balance.get('sol_free', 0):.4f} (${binance_balance.get('sol_value_usd', 0):.2f})")
+    print(f"[Bybit]   USDT: ${bybit_balance.get('usdt_free', 0):.2f} | SOL: {bybit_balance.get('sol_free', 0):.4f} (${bybit_balance.get('sol_value_usd', 0):.2f})")
+    print("-"*60)
+    
+    # 봇 자본 설정 조정
+    binance_available = binance_balance.get('usdt_free', 0)
+    bybit_available = bybit_balance.get('usdt_free', 0)
+    
+    for config in BOT_CONFIGS:
+        exchange_id = config.get('exchange_id', '')
+        original_capital = config.get('capital', 0)
+        
+        if exchange_id == 'binance' and binance_available < original_capital:
+            # Binance 봇들은 잔액 비례로 분배
+            old_capital = config['capital']
+            config['capital'] = max(0.5, binance_available * 0.3)  # 최소 $0.5 또는 30%
+            print(f"[자본 조정] {config['id']}: ${old_capital:.2f} → ${config['capital']:.2f}")
+            
+        elif exchange_id == 'bybit' and bybit_available < original_capital:
+            # Bybit 봇들은 잔액 비례로 분배
+            old_capital = config['capital']
+            config['capital'] = max(0.5, bybit_available * 0.3)
+            print(f"[자본 조정] {config['id']}: ${old_capital:.2f} → ${config['capital']:.2f}")
+    
     print("="*60 + "\n")
 
     # 순차적으로 봇 시작

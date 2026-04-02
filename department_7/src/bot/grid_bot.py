@@ -265,6 +265,26 @@ class BinanceGridBot:
         except Exception as e:
             logger.warning(f"Failed to cancel existing orders: {e}")
 
+        # 실시간 잔액 확인 및 자본 자동 조정
+        try:
+            balance = await self.exchange.fetch_balance()
+            available_usdt = float(balance.get('USDT', {}).get('free', 0))
+            original_capital = self.capital
+            
+            # 설정 자본이 실제 잔액보다 크면 조정
+            if available_usdt < self.capital:
+                self.capital = available_usdt * 0.95  # 5% 버퍼 유지
+                logger.warning(
+                    f"[자본 조정] 설정값 ${original_capital:.2f} → 실제 ${self.capital:.2f} "
+                    f"(available: ${available_usdt:.2f})"
+                )
+                # 그리드 수 재계산
+                if self.capital < self.min_notional * self.SAFETY_MARGIN * 2:
+                    logger.error(f"[자본 부족] 최소 ${self.min_notional * self.SAFETY_MARGIN * 2:.2f} 필요")
+                    self._trade_permitted = False
+        except Exception as e:
+            logger.warning(f"[잔액 확인 실패] {e}, 설정값 사용: ${self.capital}")
+
         self.status = GridStatus.RUNNING
         logger.info(f"Grid bot initialized at price ${self.current_price:.2f}")
         logger.info(f"Grid range: ${self.grid_range_low:.2f} ~ ${self.grid_range_high:.2f}")
