@@ -127,6 +127,7 @@ class GMGNCopyBot:
         self.ankr_http_url = os.environ.get("ANKR_SOLANA_HTTP_URL")
         self.helius_http_url = os.environ.get("HELIUS_RPC_URL")
         self.helius_api_key = os.environ.get("HELIUS_API_KEY")
+        self.helius_parse_url = os.environ.get("HELIUS_PARSE_TX_URL")
 
         # 통계
         self.total_copies: int = 0
