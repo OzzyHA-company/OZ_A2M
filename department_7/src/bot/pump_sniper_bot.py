@@ -548,9 +548,9 @@ class PumpSniperBot:
             signed_tx = VersionedTransaction(tx.message, [keypair])
 
             # Solana RPC로 전송
-            helius_url = os.environ.get("HELIUS_RPC_URL")
+            helius_url = os.environ.get("SOLANA_RPC_URL")
             if not helius_url:
-                logger.error("HELIUS_RPC_URL not set")
+                logger.error("SOLANA_RPC_URL not set")
                 return 0.0
 
             async with AsyncClient(helius_url) as client:
@@ -720,9 +720,9 @@ class PumpSniperBot:
             keypair = Keypair.from_base58_string(private_key)
 
             # Solana RPC 연결
-            helius_url = os.environ.get("HELIUS_RPC_URL")
+            helius_url = os.environ.get("SOLANA_RPC_URL")
             if not helius_url:
-                logger.error("HELIUS_RPC_URL not set")
+                logger.error("SOLANA_RPC_URL not set")
                 return False
 
             async with AsyncClient(helius_url) as client:

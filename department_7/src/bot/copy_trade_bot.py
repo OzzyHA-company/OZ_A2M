@@ -103,8 +103,11 @@ class GMGNCopyBot:
         self.wallet_address: Optional[str] = None
 
         # API
-        self.helius_parse_url = os.environ.get("HELIUS_PARSE_TX_URL")
-        self.helius_api_key = os.environ.get("HELIUS_API_KEY")
+        # Ant-Colony Nest Integration
+        from lib.pi_mono_bridge.ant_colony_adapter import AntColonyAdapter
+        self.ant_colony = AntColonyAdapter(config={})
+        self.use_ant_colony = True
+        # Legacy: Helius removed, using Ant-Colony + Jito
 
         # 중복 거래 필터링
         self._seen_signatures: set = set()
@@ -290,12 +293,12 @@ class GMGNCopyBot:
         import aiohttp
 
         try:
-            api_key = self.helius_api_key or os.environ.get("HELIUS_API_KEY")
+            api_key = self.helius_api_key or os.environ.get("ANT_COLONY_API_KEY")
             if not api_key:
-                logger.warning("HELIUS_API_KEY not set")
+                logger.warning("ANT_COLONY_API_KEY not set")
                 return []
 
-            helius_url = f"https://api.helius-rpc.com/v0/addresses/{wallet_address}/transactions"
+            helius_url = f"https://api.mainnet-beta.solana.com/v0/addresses/{wallet_address}/transactions"
 
             async with aiohttp.ClientSession() as session:
                 params = {"api-key": api_key, "limit": 10}
@@ -472,9 +475,9 @@ class GMGNCopyBot:
             tx = VersionedTransaction.from_bytes(tx_bytes)
             signed_tx = VersionedTransaction(tx.message, [keypair])
 
-            helius_url = os.environ.get("HELIUS_RPC_URL")
+            helius_url = os.environ.get("SOLANA_RPC_URL")
             if not helius_url:
-                logger.error("HELIUS_RPC_URL not set")
+                logger.error("SOLANA_RPC_URL not set")
                 return
 
             async with AsyncClient(helius_url) as client:
@@ -574,9 +577,9 @@ class GMGNCopyBot:
             keypair = Keypair.from_base58_string(private_key)
 
             # Solana RPC 연결
-            helius_url = os.environ.get("HELIUS_RPC_URL")
+            helius_url = os.environ.get("SOLANA_RPC_URL")
             if not helius_url:
-                logger.error("HELIUS_RPC_URL not set")
+                logger.error("SOLANA_RPC_URL not set")
                 return False
 
             async with AsyncClient(helius_url) as client:
