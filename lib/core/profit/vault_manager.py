@@ -9,6 +9,7 @@ OZ_A2M Profit Vault Manager
 """
 
 import os
+import sys
 import asyncio
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Tuple
@@ -18,6 +19,9 @@ import logging
 import json
 
 logger = logging.getLogger(__name__)
+
+# Add parent directory to path for imports
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', '..'))
 
 
 class VaultType(Enum):
@@ -174,6 +178,27 @@ class MasterVaultManager:
 
         return 0.0
 
+    async def _get_bot_current_balance_from_exchange(self, bot_id: str) -> Optional[Dict]:
+        """거래소에서 실제 잔액 조회"""
+        try:
+            # Bybit 봇
+            if 'bybit' in bot_id.lower():
+                from lib.core.profit.exchange_api_connector import get_bybit_connector
+                connector = get_bybit_connector()
+                return await connector.get_wallet_balance("USDT")
+
+            # Binance 봇
+            elif 'binance' in bot_id.lower() or 'grid' in bot_id.lower() or 'dca' in bot_id.lower():
+                from lib.core.profit.exchange_api_connector import get_binance_connector
+                connector = get_binance_connector()
+                return await connector.get_account_balance("USDT")
+
+            return None
+
+        except Exception as e:
+            logger.error(f"Failed to get balance for {bot_id}: {e}")
+            return None
+
     def _get_vault_type_for_bot(self, bot_id: str) -> VaultType:
         """봇별 금고 타입 결정"""
         if 'binance' in bot_id.lower():
@@ -212,14 +237,59 @@ class MasterVaultManager:
         return summary
 
     async def _get_vault_balance(self, vault_type: VaultType) -> Dict:
-        """개별 금고 잔액 조회"""
-        # TODO: 실제 API 연동
-        # 시뮬레이션 데이터
-        return {
-            'type': vault_type.value,
-            'balance_usd': 0.0,  # 실제 구현 시 API 조회
-            'last_update': datetime.utcnow().isoformat()
-        }
+        """개별 금고 잔액 조회 - 실제 API 연동"""
+        try:
+            if vault_type == VaultType.BYBIT_PROFIT:
+                from lib.core.profit.exchange_api_connector import get_bybit_connector
+                connector = get_bybit_connector()
+                balance = await connector.get_wallet_balance("USDT")
+                if balance.get('success'):
+                    return {
+                        'type': vault_type.value,
+                        'balance_usd': balance.get('wallet_balance', 0.0),
+                        'available_usd': balance.get('available_balance', 0.0),
+                        'unrealized_pnl': balance.get('unrealised_pnl', 0.0),
+                        'last_update': balance.get('timestamp', datetime.utcnow().isoformat())
+                    }
+
+            elif vault_type == VaultType.BINANCE_PROFIT:
+                from lib.core.profit.exchange_api_connector import get_binance_connector
+                connector = get_binance_connector()
+                # 전체 자산 USD 가치 조회
+                total_balance = await connector.get_total_balance_usd()
+                if total_balance.get('success'):
+                    assets_summary = {
+                        asset: f"{data['amount']:.4f} (${data['usd_value']:.2f})"
+                        for asset, data in total_balance.get('assets', {}).items()
+                        if data['usd_value'] > 0.01
+                    }
+                    return {
+                        'type': vault_type.value,
+                        'balance_usd': total_balance.get('total_usd', 0.0),
+                        'available_usd': total_balance.get('total_usd', 0.0),  # Spot에서는 전체가 출금 가능
+                        'unrealized_pnl': 0.0,  # Spot은 실시간 PnL 없음
+                        'assets': assets_summary,
+                        'last_update': total_balance.get('timestamp', datetime.utcnow().isoformat())
+                    }
+
+            # 기본값 (실패 시)
+            return {
+                'type': vault_type.value,
+                'balance_usd': 0.0,
+                'available_usd': 0.0,
+                'unrealized_pnl': 0.0,
+                'last_update': datetime.utcnow().isoformat()
+            }
+
+        except Exception as e:
+            logger.error(f"Failed to get vault balance for {vault_type.value}: {e}")
+            return {
+                'type': vault_type.value,
+                'balance_usd': 0.0,
+                'available_usd': 0.0,
+                'unrealized_pnl': 0.0,
+                'last_update': datetime.utcnow().isoformat()
+            }
 
     def _save_records(self):
         """기록 저장"""

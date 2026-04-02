@@ -8,6 +8,26 @@
 
 ---
 
+## 세션 시작 시 필수 확인 (무조건 실행)
+
+**모든 세션 시작 전 (ozkimi, ozcode, cc 등 모두 해당):**
+
+```bash
+# 1. 중앙 비밀 저장소 확인
+cat ~/.ozzy-secrets/master.env | head -20
+
+# 2. 메모리 파일 확인
+read /home/ozzy-claw/.claude/projects/-home-ozzy-claw/memory/SHARED_CONTEXT.md
+read /home/ozzy-claw/.claude/projects/-home-ozzy-claw/memory/LAST_SESSION.json
+
+# 3. 환경변수 로드 확인
+env | grep -E "(BINANCE|BYBIT|PHANTOM|METAMASK|TELEGRAM)" | wc -l
+```
+
+**⚠️ 이 파일들을 읽지 않고는 절대 작업 시작하지 않는다.**
+
+---
+
 ## 자동 진행 항목 (승인 불필요)
 
 - 코드 작성 / 수정 / 삭제
@@ -44,6 +64,46 @@ RAM              # 32GB (25GB 여유)
 
 ---
 
+## 물리적 시스템 정보
+
+**Ubuntu 컴퓨터 특성:**
+- **안정성**: 시스템 이상 없을 시 재부팅 거의 없음
+- **접근 방식**: SSH 원격 접속만 사용 (물리적 조작 없음)
+- **사용자 접속**: MacBook에서 SSH 연결하여 구축/실행/수리 명령
+- **네트워크**: 동일 네트워크 또는 외부에서 SSH 접속
+
+**접속 정보:**
+- **낭북 IP**: 192.168.51.28 (고정)
+- **외부 접속**: Tailscale VPN 권장 (100.77.207.113)
+
+---
+
+## 중앙 비밀 저장소 (Critical)
+
+**위치:** `~/.ozzy-secrets/master.env`
+**권한:** 600 (본인만 읽기)
+**설명:** 모든 API 키, 지갑 주소, 비밀키가 저장된 중앙 저장소
+
+**참조 방법:**
+```bash
+# 직접 확인
+cat ~/.ozzy-secrets/master.env | grep -E "(API_KEY|WALLET|SECRET)"
+
+# 환경변수로 로드
+export $(cat ~/.ozzy-secrets/master.env | xargs)
+```
+
+**주요 섹션:**
+- `LLM API Keys`: GEMINI_API_KEY, GROQ_API_KEY, KIMI_API_KEY 등
+- `Telegram`: TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID
+- `거래소`: BINANCE_API_KEY, BYBIT_API_KEY, UPBIT_ACCESS_KEY 등
+- `지갑`: PHANTOM_WALLET_*, METAMASK_PROFIT_WALLET 등
+- `RPC`: HELIUS_API_KEY 등
+
+**⚠️ 중요:** 이 파일 외부에는 민감정보를 저장하지 않는다. 모든 설정은 이 파일을 참조한다.
+
+---
+
 ## 알려진 이슈 (재발 방지)
 
 | 이슈 | 해결책 |
@@ -54,6 +114,33 @@ RAM              # 32GB (25GB 여유)
 | `occore.logger` import 오류 | `lib.core.logger` 로 수정 |
 | `occore.messaging` import 오류 | `lib.messaging` 으로 수정 |
 | Gateway unhealthy | Docker exec 격리 이슈 — 외부 접근은 정상 |
+
+---
+
+## 재부팅 후 자동 복구 명령어
+
+**세션 재시작 또는 재부팅 후 반드시 실행:**
+
+```bash
+# 1. 환경변수 로드
+export $(cat ~/.ozzy-secrets/master.env | xargs)
+
+# 2. 봇 시스템 확인
+cd /home/ozzy-claw/OZ_A2M
+ps aux | grep -E "(run_all_bots|rpg_dashboard)" | grep -v grep
+
+# 3. 대시보드 재시작 (필요시)
+pkill -f rpg_dashboard.py 2>/dev/null
+sleep 1
+cd /home/ozzy-claw/OZ_A2M/department_7/src/dashboard
+nohup python3 rpg_dashboard.py > /tmp/rpg_dashboard.log 2>&1 &
+sleep 2
+echo "Dashboard: http://192.168.51.28:8080 | http://100.77.207.113:8080"
+curl -s http://192.168.51.28:8080/api/vault/summary | python3 -c "import sys,json; d=json.load(sys.stdin); print(f\"Total: ${d['total_profit_usd']:.2f}\")"
+
+# 4. 봇 상태 확인
+curl -s http://192.168.51.28:8080/api/bots/status 2>/dev/null || echo "Bot status endpoint not available"
+```
 
 ---
 

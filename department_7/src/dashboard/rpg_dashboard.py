@@ -12,6 +12,14 @@ Features:
 """
 
 import asyncio
+import os
+
+# 환경변수 로드 (API 키, 지갑 주소 등) - CLAUDE.md 기준
+from dotenv import load_dotenv
+env_path = os.path.expanduser('~/.ozzy-secrets/master.env')
+if os.path.exists(env_path):
+    load_dotenv(env_path, override=True)
+    print(f"✅ 환경변수 로드 완료: {env_path}")
 from datetime import datetime
 from typing import Dict, List, Optional
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
@@ -20,9 +28,22 @@ from fastapi.responses import HTMLResponse
 import json
 import logging
 
-from ...lib.core.profit import get_vault_manager, get_settlement_system
-from ...lib.core.reward_system import RPGSystem, BotGrade
-from ...department_7.src.bot.run_all_bots import BOT_CONFIGS
+import sys
+import os
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', '..'))
+
+from lib.core.profit import get_vault_manager, get_settlement_system
+from lib.core.reward_system.rpg_system_v2 import RPGSystemV2, BotTier
+
+# Lazy load BOT_CONFIGS to avoid import issues
+def get_bot_configs():
+    import sys
+    import os
+    bot_dir = os.path.join(os.path.dirname(__file__), '..', 'bot')
+    if bot_dir not in sys.path:
+        sys.path.insert(0, bot_dir)
+    from run_all_bots import BOT_CONFIGS
+    return BOT_CONFIGS
 
 logger = logging.getLogger(__name__)
 
@@ -38,14 +59,14 @@ class RPGDashboard:
     def __init__(self):
         self.vault_manager = get_vault_manager()
         self.settlement_system = get_settlement_system()
-        self.rpg = RPGSystem()
+        self.rpg = RPGSystemV2()
         self.active_connections: List[WebSocket] = []
 
     async def get_bot_cards(self) -> List[Dict]:
         """RPG 스타일 봇 카드 데이터"""
         cards = []
 
-        for config in BOT_CONFIGS:
+        for config in get_bot_configs():
             bot_id = config['id']
             bot_name = config['name']
 
@@ -56,13 +77,13 @@ class RPGDashboard:
             profit_data = await self._get_bot_profit_data(bot_id)
 
             # 등급 스타일
-            tier_style = self._get_tier_style(rpg_state.grade)
+            tier_style = self._get_tier_style(rpg_state.tier)
 
             card = {
                 'bot_id': bot_id,
                 'bot_name': bot_name,
                 'tier': {
-                    'name': rpg_state.grade.kr_name,
+                    'name': rpg_state.tier.kr_name,
                     'color': tier_style['color'],
                     'glow': tier_style['glow'],
                     'border': tier_style['border'],
@@ -70,7 +91,7 @@ class RPGDashboard:
                 'level': {
                     'current': rpg_state.level.current,
                     'progress_pct': rpg_state.level.progress_pct,
-                    'next_exp': rpg_state.level._required_exp_for_next(),
+                    'next_exp': 0,
                 },
                 'hp': {
                     'current': rpg_state.hp.current,
@@ -117,26 +138,60 @@ class RPGDashboard:
         """마스터 금고 요약"""
         return await self.vault_manager.get_vault_summary()
 
-    def _get_tier_style(self, grade: BotGrade) -> Dict:
+    def _get_tier_style(self, tier: BotTier) -> Dict:
         """등급별 스타일"""
-        styles = {
-            BotGrade.BRONZE: {'color': '#CD7F32', 'glow': 'bronze', 'border': '2px solid #CD7F32'},
-            BotGrade.SILVER: {'color': '#C0C0C0', 'glow': 'silver', 'border': '3px solid #C0C0C0'},
-            BotGrade.GOLD: {'color': '#FFD700', 'glow': 'gold', 'border': '3px solid #FFD700'},
-            BotGrade.PLATINUM: {'color': '#E5E4E2', 'glow': 'platinum', 'border': '3px solid #E5E4E2'},
-            BotGrade.DIAMOND: {'color': '#B9F2FF', 'glow': 'diamond', 'border': '4px solid #B9F2FF'},
-            BotGrade.LEGEND: {'color': '#FF6B35', 'glow': 'legend', 'border': '5px double #FF6B35'},
+        return {
+            'color': tier.color,
+            'glow': tier.en_name.lower(),
+            'border': f'2px solid {tier.color}',
         }
-        return styles.get(grade, styles[BotGrade.BRONZE])
 
     async def _get_bot_profit_data(self, bot_id: str) -> Dict:
-        """봇 수익 데이터"""
-        # TODO: 실제 수익 데이터 조회
-        return {
-            'realized_profit': 0.0,
-            'profit_pct': 0.0,
-            'today_pnl': 0.0,
-        }
+        """봇 수익 데이터 - 실제 거래소 API 연동"""
+        try:
+            from lib.core.profit.vault_manager import get_vault_manager
+            vault = get_vault_manager()
+
+            # 거래소에서 실제 잔액 조회
+            balance_data = await vault._get_bot_current_balance_from_exchange(bot_id)
+
+            if balance_data and balance_data.get('success'):
+                current_balance = balance_data.get('wallet_balance', 0.0)
+                unrealized_pnl = balance_data.get('unrealised_pnl', 0.0)
+
+                # 원금 조회
+                base_capital = await vault._get_bot_base_capital(bot_id)
+
+                # 수익 계산
+                realized_profit = current_balance - base_capital - unrealized_pnl
+                profit_pct = (realized_profit / base_capital * 100) if base_capital > 0 else 0
+
+                return {
+                    'realized_profit': realized_profit,
+                    'profit_pct': profit_pct,
+                    'today_pnl': unrealized_pnl,
+                    'current_balance': current_balance,
+                    'base_capital': base_capital,
+                    'success': True
+                }
+
+            # API 실패 시 기본값
+            return {
+                'realized_profit': 0.0,
+                'profit_pct': 0.0,
+                'today_pnl': 0.0,
+                'success': False,
+                'error': balance_data.get('error', 'Unknown error') if balance_data else 'No data'
+            }
+
+        except Exception as e:
+            return {
+                'realized_profit': 0.0,
+                'profit_pct': 0.0,
+                'today_pnl': 0.0,
+                'success': False,
+                'error': str(e)
+            }
 
     async def broadcast_update(self):
         """모든 연결된 클라이언트에 실시간 업데이트"""
@@ -579,6 +634,23 @@ async def api_withdraw(data: dict):
 
     # TODO: 실제 출금 로직
     return {'success': True, 'bot_id': bot_id, 'amount': amount, 'status': 'pending'}
+
+
+@app.get("/api/vault/summary")
+async def api_vault_summary():
+    """금고 요약 API"""
+    try:
+        summary = await dashboard.get_vault_summary()
+        return summary
+    except Exception as e:
+        logger.error(f"Vault summary error: {e}")
+        return {
+            'timestamp': datetime.utcnow().isoformat(),
+            'total_profit_usd': 0.0,
+            'today_profit_usd': 0.0,
+            'vaults': {},
+            'error': str(e)
+        }
 
 
 if __name__ == "__main__":

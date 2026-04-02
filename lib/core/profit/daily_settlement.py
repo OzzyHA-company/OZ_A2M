@@ -15,7 +15,6 @@ from typing import Dict, List, Optional
 import logging
 
 from .vault_manager import get_vault_manager, VaultType
-from ...department_7.src.bot.run_all_bots import BOT_CONFIGS
 
 logger = logging.getLogger(__name__)
 
@@ -27,10 +26,24 @@ class DailySettlementSystem:
     00:00 UTC에 모든 봇의 수익을 정산하여 마스터 금고로 인출
     """
 
-    def __init__(self):
+    def __init__(self, bot_configs=None):
         self.vault_manager = get_vault_manager()
         self.settlement_time = "00:00"  # UTC
         self.is_running = False
+        self._bot_configs = bot_configs
+
+    def _get_bot_configs(self):
+        """Lazy load BOT_CONFIGS to avoid import issues"""
+        if self._bot_configs is None:
+            import sys
+            import os
+            # Add department_7/src/bot to path for imports
+            bot_dir = os.path.join(os.path.dirname(__file__), '..', '..', '..', 'department_7', 'src', 'bot')
+            if bot_dir not in sys.path:
+                sys.path.insert(0, bot_dir)
+            from run_all_bots import BOT_CONFIGS
+            self._bot_configs = BOT_CONFIGS
+        return self._bot_configs
 
     async def run_daily_settlement(self):
         """일일 정산 실행"""
@@ -53,7 +66,7 @@ class DailySettlementSystem:
             'details': []
         }
 
-        for config in BOT_CONFIGS:
+        for config in self._get_bot_configs():
             bot_id = config['id']
             try:
                 result = await self._settle_bot(bot_id)
@@ -145,7 +158,7 @@ class DailySettlementSystem:
         # TODO: 실제 거래소 API 연동
         # 지금은 시뮬레이션 (원금 기준)
 
-        for config in BOT_CONFIGS:
+        for config in self._get_bot_configs():
             if config['id'] == bot_id:
                 base_capital = config['kwargs'].get('capital', 0)
                 # 시뮬레이션: 원금 + 소량 수익
