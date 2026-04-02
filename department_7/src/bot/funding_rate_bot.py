@@ -395,7 +395,10 @@ class FundingRateBot:
 
             # 현물 매수
             ticker = await exchange.fetch_ticker(symbol)
-            price = ticker["last"]
+            price = ticker.get("last") or ticker.get("close") or ticker.get("bid")
+            if not price:
+                logger.warning(f"Cannot get price for {symbol}, skipping")
+                return
             amount = self._amount_to_precision(exchange_id, symbol, position_capital / price)
 
             spot_order = await exchange.create_market_buy_order(symbol, amount)

@@ -285,28 +285,75 @@ class JitoBlockEngineSender:
 
     async def _submit_bundle(self, bundle: Bundle) -> bool:
         """
-        Submit bundle to Jito Block Engine
-        TODO: Implement actual gRPC submission
+        Submit bundle to Jito Block Engine via REST API
+        Endpoint: https://mainnet.block-engine.jito.wtf/api/v1/bundles
+        No auth required for basic submission.
         """
+        import httpx
+
         try:
-            # Serialize transactions
-            serialized_txs = [
-                base64.b64encode(tx.serialize()).decode()
-                for tx in bundle.transactions
-            ]
+            # Serialize transactions to base58/base64
+            serialized_txs = []
+            for tx in bundle.transactions:
+                try:
+                    serialized_txs.append(base64.b64encode(bytes(tx)).decode())
+                except Exception:
+                    serialized_txs.append(base64.b64encode(tx.serialize()).decode())
 
-            # TODO: Actual gRPC call
-            # request = SubmitBundleRequest(
-            #     transactions=serialized_txs,
-            #     tip_account=self.tip_account,
-            # )
-            # response = await self.stub.SubmitBundle(request)
+            payload = {
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "sendBundle",
+                "params": [serialized_txs]
+            }
 
-            logger.info(f"Would submit bundle with {len(serialized_txs)} txs")
-            return True
+            headers = {"Content-Type": "application/json"}
+
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                resp = await client.post(
+                    "https://mainnet.block-engine.jito.wtf/api/v1/bundles",
+                    json=payload,
+                    headers=headers,
+                )
+                data = resp.json()
+
+                if "result" in data:
+                    bundle_id = data["result"]
+                    logger.info(f"Bundle submitted to Jito: {bundle_id}")
+                    return True
+                elif "error" in data:
+                    logger.warning(f"Jito bundle rejected: {data['error']}")
+                    # Fallback: send first TX via standard RPC
+                    return await self._fallback_send(bundle)
+                return False
 
         except Exception as e:
             logger.error(f"Bundle submission error: {e}")
+            return await self._fallback_send(bundle)
+
+    async def _fallback_send(self, bundle: Bundle) -> bool:
+        """Fallback: send first transaction via standard Solana RPC"""
+        try:
+            if not bundle.transactions:
+                return False
+            tx = bundle.transactions[0]
+            tx_bytes = base64.b64encode(bytes(tx)).decode()
+            import httpx
+            rpc_url = self.rpc_url
+            payload = {
+                "jsonrpc": "2.0", "id": 1,
+                "method": "sendTransaction",
+                "params": [tx_bytes, {"encoding": "base64", "skipPreflight": False}]
+            }
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                resp = await client.post(rpc_url, json=payload)
+                data = resp.json()
+                if "result" in data:
+                    logger.info(f"Fallback TX sent: {data['result']}")
+                    return True
+            return False
+        except Exception as e:
+            logger.error(f"Fallback send error: {e}")
             return False
 
     async def get_bundle_status(self, uuid: str) -> Optional[Dict]:

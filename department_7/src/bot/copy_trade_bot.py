@@ -475,9 +475,9 @@ class GMGNCopyBot:
             tx = VersionedTransaction.from_bytes(tx_bytes)
             signed_tx = VersionedTransaction(tx.message, [keypair])
 
-            helius_url = os.environ.get("SOLANA_RPC_URL")
+            helius_url = os.environ.get("SOLANA_RPC_URL") or os.environ.get("HELIUS_RPC_URL")
             if not helius_url:
-                logger.error("SOLANA_RPC_URL not set")
+                logger.error("SOLANA_RPC_URL / HELIUS_RPC_URL not set")
                 return
 
             async with AsyncClient(helius_url) as client:
@@ -577,9 +577,9 @@ class GMGNCopyBot:
             keypair = Keypair.from_base58_string(private_key)
 
             # Solana RPC 연결
-            helius_url = os.environ.get("SOLANA_RPC_URL")
+            helius_url = os.environ.get("SOLANA_RPC_URL") or os.environ.get("HELIUS_RPC_URL")
             if not helius_url:
-                logger.error("SOLANA_RPC_URL not set")
+                logger.error("SOLANA_RPC_URL / HELIUS_RPC_URL not set")
                 return False
 
             async with AsyncClient(helius_url) as client:

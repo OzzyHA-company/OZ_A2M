@@ -25,6 +25,16 @@ from pathlib import Path
 project_root = Path(__file__).parent.parent.parent.parent
 sys.path.insert(0, str(project_root))
 
+# Jito 파이프라인 (Data In: Shredstream, Data Out: Block Engine)
+try:
+    sys.path.insert(0, str(project_root / "jito" / "shredstream"))
+    sys.path.insert(0, str(project_root / "jito" / "block_engine"))
+    from proxy import JitoShredstreamProxy
+    from sender import JitoBlockEngineSender
+    JITO_AVAILABLE = True
+except ImportError:
+    JITO_AVAILABLE = False
+
 from lib.core.logger import get_logger
 from lib.messaging.mqtt_client import MQTTClient, MQTTConfig
 from lib.messaging.event_bus import EventBus, get_event_bus
@@ -127,6 +137,15 @@ class PumpSniperBot:
         if not self.quicknode_ws_url and self.quicknode_http_url:
             self.quicknode_ws_url = self.quicknode_http_url.replace("https://", "wss://")
 
+        # Jito 파이프라인 (Data In: Shredstream, Data Out: Block Engine)
+        self.jito_proxy: Optional[Any] = None
+        self.jito_sender: Optional[Any] = None
+        if JITO_AVAILABLE:
+            self.jito_proxy = JitoShredstreamProxy()
+            self.jito_sender = JitoBlockEngineSender(
+                rpc_url=os.environ.get("HELIUS_RPC_URL", "https://api.mainnet-beta.solana.com")
+            )
+
         # 통계
         self.tokens_detected: int = 0
         self.tokens_sniped: int = 0
@@ -205,6 +224,11 @@ class PumpSniperBot:
 
                 self.status = SniperStatus.RUNNING
                 logger.info("Pump.fun sniper live mode initialized (QuickNode)")
+
+                # Jito Shredstream 파이프라인 시작 (Data In)
+                if self.jito_proxy:
+                    asyncio.create_task(self.jito_proxy.start())
+                    logger.info("Jito Shredstream proxy started (QuickNode→AntColony pipeline)")
 
                 # 시작 알림
                 await self._send_telegram_notification(
@@ -548,9 +572,9 @@ class PumpSniperBot:
             signed_tx = VersionedTransaction(tx.message, [keypair])
 
             # Solana RPC로 전송
-            helius_url = os.environ.get("SOLANA_RPC_URL")
+            helius_url = os.environ.get("SOLANA_RPC_URL") or os.environ.get("HELIUS_RPC_URL")
             if not helius_url:
-                logger.error("SOLANA_RPC_URL not set")
+                logger.error("SOLANA_RPC_URL / HELIUS_RPC_URL not set")
                 return 0.0
 
             async with AsyncClient(helius_url) as client:
@@ -720,9 +744,9 @@ class PumpSniperBot:
             keypair = Keypair.from_base58_string(private_key)
 
             # Solana RPC 연결
-            helius_url = os.environ.get("SOLANA_RPC_URL")
+            helius_url = os.environ.get("SOLANA_RPC_URL") or os.environ.get("HELIUS_RPC_URL")
             if not helius_url:
-                logger.error("SOLANA_RPC_URL not set")
+                logger.error("SOLANA_RPC_URL / HELIUS_RPC_URL not set")
                 return False
 
             async with AsyncClient(helius_url) as client:
