@@ -2097,9 +2097,10 @@ async def get_capital_status():
 @app.get("/api/withdrawals/status")
 async def get_withdrawal_status():
     """출금 현황 (원금-보존 시스템)"""
+    import sqlite3
     try:
         # SQLite에서 출금 기록 조회
-        conn = sqlite3.connect("data/profit_tracking.db")
+        conn = sqlite3.connect("/home/ozzy-claw/.openclaw/skills/oz-a2m-ant-colony-nest/data/nest.db")
         cursor = conn.cursor()
 
         cursor.execute("""
