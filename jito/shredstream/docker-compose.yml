@@ -1,0 +1,18 @@
+services:
+  shredstream-proxy:
+    image: jitolabs/jito-shredstream-proxy
+    restart: unless-stopped
+    volumes:
+      - /home/ozzy-claw/.ozzy-secrets/jito_shredstream_keypair.json:/app/keypair.json:ro
+    command: >
+      shredstream
+      --block-engine-url https://mainnet.block-engine.jito.wtf
+      --auth-keypair /app/keypair.json
+      --desired-regions amsterdam,ny,tokyo
+      --dest-ip-ports 127.0.0.1:10000
+    network_mode: host
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
