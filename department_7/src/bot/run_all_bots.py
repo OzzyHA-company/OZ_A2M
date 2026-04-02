@@ -53,7 +53,7 @@ BOT_CONFIGS = [
             'bot_id': 'dca_binance_001',
             'symbol': 'SOL/USDT',
             'exchange_id': 'binance',
-            'capital': 14.0,
+            'capital': 13.0,  # 2026-04-02 업데이트: $32.71 재분배
             'dca_drop_pct': 0.02,
             'take_profit_pct': 0.03,
             'sandbox': False,
@@ -69,7 +69,7 @@ BOT_CONFIGS = [
             'bot_id': 'grid_binance_001',
             'symbol': 'SOL/USDT',
             'exchange_id': 'binance',
-            'capital': 11.0,
+            'capital': 10.0,  # 2026-04-02 업데이트: $32.71 재분배
             'grid_count': 20,
             'grid_spacing_pct': 0.005,
             'sandbox': False,
@@ -84,7 +84,7 @@ BOT_CONFIGS = [
         'kwargs': {
             'bot_id': 'triarb_binance_001',
             'exchange_id': 'binance',
-            'capital': 10.35,  # Binance 자본 분배
+            'capital': 9.71,  # 2026-04-02 업데이트: $32.71 재분배 (13+10+9.71=32.71)
             'min_profit_pct': 0.001,
             'sandbox': False,
             'telegram_alerts': True
@@ -97,7 +97,7 @@ BOT_CONFIGS = [
         'class': FundingRateBot,
         'kwargs': {
             'bot_id': 'funding_binance_bybit_001',
-            'capital': 5.40,  # Bybit 자본 분배 재조정 ($24.40 중)
+            'capital': 5.00,  # 2026-04-02 업데이트: $23.32 재분배
             'min_funding_rate': 0.0001,
             'sandbox': False,
             'telegram_alerts': True
@@ -112,7 +112,7 @@ BOT_CONFIGS = [
             'bot_id': 'grid_bybit_001',
             'symbol': 'SOL/USDT',
             'exchange_id': 'bybit',
-            'capital': 11.0,
+            'capital': 10.32,  # 2026-04-02 업데이트: $23.32 재분배 (5+10.32+8=23.32)
             'grid_count': 15,
             'grid_spacing_pct': 0.005,
             'sandbox': False,
@@ -128,7 +128,7 @@ BOT_CONFIGS = [
             'bot_id': 'scalper_bybit_001',
             'symbol': 'SOL/USDT',
             'exchange_id': 'bybit',
-            'capital': 8.00,  # Bybit 자본 분배 재조정 ($24.40 중)
+            'capital': 8.00,  # 2026-04-02 유지
             'sandbox': False,
             'telegram_alerts': True
         }
@@ -141,7 +141,7 @@ BOT_CONFIGS = [
         'kwargs': {
             'bot_id': 'hyperliquid_mm_001',
             'symbol': 'SOL-PERP',
-            'capital': 4.69,  # Phantom A 지갑 자본 ($4.69 SOL)
+            'capital': 4.43,  # 2026-04-02: Phantom A $4.44 SOL - $0.01 사용분
             'base_spread_bps': 10.0,
             'sandbox': False,
             'mock_mode': False,

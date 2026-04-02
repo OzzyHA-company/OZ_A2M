@@ -29,6 +29,8 @@ services:
     container_name: oz_a2m_gateway
     ports:
       - "8000:8000"
+    env_file:
+      - /home/ozzy-claw/.ozzy-secrets/master.env
     environment:
       - MQTT_HOST=mqtt-broker
       - MQTT_PORT=1883

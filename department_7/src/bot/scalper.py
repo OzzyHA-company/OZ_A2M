@@ -310,7 +310,7 @@ class BybitScalpingBot:
                                      (datetime.utcnow() - self.last_signal_time).total_seconds() > signal_timeout)
                         if no_signal and self.daily_pnl > -self.max_daily_loss:
                             try:
-                                ticker = self.exchange.fetch_ticker(self.symbol)
+                                ticker = await self.exchange.fetch_ticker(self.symbol)
                                 price = ticker["last"]
                                 price_history.append(price)
                                 if len(price_history) > 20:
