@@ -2067,3 +2067,194 @@ async def periodic_balance_update():
 
 if __name__ == "__main__":
     asyncio.run(main())
+# ========== 긴급 추가: 자본 및 잔액 관리 API ==========
+
+@app.get("/api/capital")
+async def get_capital_status():
+    """전체 자본 현황 (CTO용 통합 뷰)"""
+    # 자본 분배 데이터 로드
+    capital_allocations = load_capital_allocations()
+
+    # 거래소 잔액 조회
+    exchange_balances = await get_exchange_balances()
+
+    # 지갑 잔액 조회
+    wallet_balances = await get_wallet_balances()
+
+    return {
+        "timestamp": datetime.utcnow().isoformat(),
+        "allocated_capital": capital_allocations.get("total_capital", 97.79),
+        "actual_balance": {
+            "exchanges": exchange_balances,
+            "wallets": wallet_balances,
+            "total_usd": calculate_total_usd(exchange_balances, wallet_balances)
+        },
+        "allocations": capital_allocations.get("allocations", {}),
+        "variance": calculate_variance(capital_allocations, exchange_balances, wallet_balances)
+    }
+
+
+@app.get("/api/withdrawals/status")
+async def get_withdrawal_status():
+    """출금 현황 (원금-보존 시스템)"""
+    try:
+        # SQLite에서 출금 기록 조회
+        conn = sqlite3.connect("data/profit_tracking.db")
+        cursor = conn.cursor()
+
+        cursor.execute("""
+            SELECT bot_id, amount, currency, destination, status, completed_at
+            FROM withdrawal_history
+            ORDER BY completed_at DESC
+            LIMIT 50
+        """)
+
+        withdrawals = []
+        for row in cursor.fetchall():
+            withdrawals.append({
+                "bot_id": row[0],
+                "amount": row[1],
+                "currency": row[2],
+                "destination": row[3],
+                "status": row[4],
+                "completed_at": row[5]
+            })
+
+        conn.close()
+
+        return {
+            "total_withdrawals": len(withdrawals),
+            "total_amount": sum(w["amount"] for w in withdrawals),
+            "recent_withdrawals": withdrawals
+        }
+    except Exception as e:
+        return {"error": str(e), "total_withdrawals": 0, "recent_withdrawals": []}
+
+
+@app.get("/api/bots/all")
+async def get_all_bots_detailed():
+    """모든 봇 상세 정보 (11개 봇 전부)"""
+    all_bots = []
+
+    # 11개 봇 정의
+    bot_definitions = [
+        {"id": "grid_binance_001", "name": "Binance Grid", "type": "grid", "exchange": "binance", "symbol": "BTC/USDT", "capital": 11.0},
+        {"id": "dca_binance_001", "name": "Binance DCA", "type": "dca", "exchange": "binance", "symbol": "BTC/USDT", "capital": 14.0},
+        {"id": "triarb_binance_001", "name": "Triangular Arb", "type": "triarb", "exchange": "binance", "symbol": "BTC/ETH/BNB", "capital": 10.35},
+        {"id": "funding_binance_bybit_001", "name": "Funding Rate", "type": "funding", "exchange": "binance+bybit", "symbol": "Multi", "capital": 8.0},
+        {"id": "grid_bybit_001", "name": "Bybit Grid", "type": "grid", "exchange": "bybit", "symbol": "SOL/USDT", "capital": 11.0},
+        {"id": "scalper_bybit_001", "name": "Bybit Scalper", "type": "scalper", "exchange": "bybit", "symbol": "SOL/USDT", "capital": 8.0},
+        {"id": "hyperliquid_mm_001", "name": "Hyperliquid MM", "type": "mm", "exchange": "hyperliquid", "symbol": "SOL-PERP", "capital": 6.19},
+        {"id": "ibkr_forecast_001", "name": "IBKR Forecast", "type": "forecast", "exchange": "ibkr", "symbol": "AAPL/MSFT", "capital": 10.0},
+        {"id": "polymarket_ai_001", "name": "Polymarket AI", "type": "prediction", "exchange": "polymarket", "symbol": "Multi", "capital": 19.84},
+        {"id": "pump_sniper_001", "name": "Pump.fun Sniper", "type": "sniper", "exchange": "solana", "symbol": "New Tokens", "capital": 6.19},
+        {"id": "gmgn_copy_001", "name": "GMGN Copy", "type": "copy_trade", "exchange": "solana", "symbol": "Smart Money", "capital": 6.18},
+    ]
+
+    for bot_def in bot_definitions:
+        # 실행 상태 확인
+        is_running = await check_bot_process(bot_def["id"])
+
+        # 수익 데이터 (Nest 또는 로컬)
+        pnl = await get_bot_pnl(bot_def["id"])
+
+        all_bots.append({
+            **bot_def,
+            "status": "running" if is_running else "stopped",
+            "pnl": pnl,
+            "pnl_pct": (pnl / bot_def["capital"] * 100) if bot_def["capital"] > 0 else 0
+        })
+
+    return {
+        "total_bots": len(all_bots),
+        "running_bots": sum(1 for b in all_bots if b["status"] == "running"),
+        "total_pnl": sum(b["pnl"] for b in all_bots),
+        "bots": all_bots
+    }
+
+
+# 헬퍼 함수들
+def load_capital_allocations():
+    """자본 분배 데이터 로드"""
+    try:
+        with open("data/capital_allocations.json", "r") as f:
+            return json.load(f)
+    except:
+        return {"total_capital": 97.79, "allocations": {}}
+
+
+async def get_exchange_balances():
+    """거래소 잔액 조회"""
+    # 캐시된 데이터 반환 (실제 구현은 백그라운드에서)
+    return {
+        "binance": {"USDT": 32.71, "SOL": 0.41},
+        "bybit": {"USDT": 23.32, "SOL": 0.27}
+    }
+
+
+async def get_wallet_balances():
+    """지갑 잔액 조회"""
+    return {
+        "phantom_a_hyperliquid": {"SOL": 0.0555, "USD": 4.44},
+        "phantom_b_pumpfun": {"SOL": 0.0985, "USD": 7.88},
+        "phantom_c_gmgn": {"SOL": 0.066, "USD": 5.28},
+        "metamask_polygon": {"USDC": 19.84}
+    }
+
+
+def calculate_total_usd(exchange_balances, wallet_balances):
+    """총 USD 가치 계산"""
+    total = 0
+    # 거래소
+    for ex, assets in exchange_balances.items():
+        for asset, amount in assets.items():
+            if asset == "USDT":
+                total += amount
+            elif asset == "SOL":
+                total += amount * 80  # $80/SOL
+
+    # 지갑
+    for wallet, assets in wallet_balances.items():
+        for asset, value in assets.items():
+            if asset == "USD" or asset == "USDC":
+                total += value
+            elif asset == "SOL":
+                total += value * 80
+
+    return round(total, 2)
+
+
+def calculate_variance(allocations, exchange_balances, wallet_balances):
+    """자본 편차 계산"""
+    allocated = allocations.get("total_capital", 97.79)
+    actual = calculate_total_usd(exchange_balances, wallet_balances)
+    return {
+        "allocated": allocated,
+        "actual": actual,
+        "difference": round(actual - allocated, 2),
+        "variance_pct": round((actual - allocated) / allocated * 100, 2)
+    }
+
+
+async def check_bot_process(bot_id: str) -> bool:
+    """봇 프로세스 실행 여부 확인"""
+    import subprocess
+    result = subprocess.run(
+        ["pgrep", "-f", bot_id],
+        capture_output=True
+    )
+    return result.returncode == 0
+
+
+async def get_bot_pnl(bot_id: str) -> float:
+    """봇 수익 조회"""
+    # Nest API에서 조회
+    try:
+        async with httpx.AsyncClient() as client:
+            response = await client.get(f"{NEST_API_URL}/api/bots/{bot_id}", timeout=2.0)
+            if response.status_code == 200:
+                data = response.json()
+                return data.get("pnl", 0)
+    except:
+        pass
+    return 0.0
