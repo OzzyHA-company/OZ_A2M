@@ -28,7 +28,7 @@ services:
       dockerfile: Dockerfile
     container_name: oz_a2m_gateway
     ports:
-      - "8000:8000"
+      - "8100:8000"
     env_file:
       - /home/ozzy-claw/.ozzy-secrets/master.env
     environment:
