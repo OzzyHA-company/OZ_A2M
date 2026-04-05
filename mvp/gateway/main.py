@@ -23,6 +23,9 @@ from starlette.responses import Response
 # Import LLM Router
 from llm_router import router as llm_router
 
+# Import Bots Router
+from routes.bots import router as bots_router
+
 # 로깅 설정
 structlog.configure(
     processors=[
@@ -295,6 +298,9 @@ async def websocket_endpoint(websocket: WebSocket):
 
 # Include LLM Router
 app.include_router(llm_router)
+
+# Include Bots Router
+app.include_router(bots_router, prefix="/api/v1")
 
 
 # ===== Bot Management Endpoints =====
