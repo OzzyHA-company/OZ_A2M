@@ -26,6 +26,18 @@ from llm_router import router as llm_router
 # Import Bots Router
 from routes.bots import router as bots_router
 
+# Import Metrics Router
+from routes.metrics import router as metrics_router
+
+# Import Notifications Router
+from routes.notifications import router as notifications_router
+
+# Import Logs Router
+from routes.logs import router as logs_router
+
+# Import Slime Router
+from routes.slime import router as slime_router
+
 # 로깅 설정
 structlog.configure(
     processors=[
@@ -301,6 +313,18 @@ app.include_router(llm_router)
 
 # Include Bots Router
 app.include_router(bots_router, prefix="/api/v1")
+
+# Include Metrics Router
+app.include_router(metrics_router, prefix="/api/v1")
+
+# Include Notifications Router
+app.include_router(notifications_router, prefix="/api/v1")
+
+# Include Logs Router
+app.include_router(logs_router, prefix="/api/v1")
+
+# Include Slime Router
+app.include_router(slime_router, prefix="/api/v1")
 
 
 # ===== Bot Management Endpoints =====
