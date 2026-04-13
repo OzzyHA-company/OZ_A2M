@@ -206,6 +206,11 @@ class PumpSniperBot:
                 logger.warning("No wallet address configured, using default capital")
                 return
 
+            # Solana 주소 유효성 검사 (32-44자 base58)
+            if len(wallet_address) < 32 or len(wallet_address) > 44:
+                logger.warning(f"Invalid wallet address length: {len(wallet_address)}, using default capital")
+                return
+
             rpc_url = self._get_best_rpc_url()
             if not rpc_url:
                 logger.warning("No RPC URL available, using default capital")
