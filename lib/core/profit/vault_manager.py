@@ -162,20 +162,87 @@ class MasterVaultManager:
 
     async def _execute_withdrawal(self, bot_id: str, amount: float, vault_type: VaultType) -> str:
         """실제 인출 실행"""
-        # TODO: 실제 거래소 API 연동
-        # 지금은 시뮬레이션
-        await asyncio.sleep(0.1)
-        return f"simulated_tx_{datetime.utcnow().timestamp()}"
+        from lib.core.profit.exchange_api_connector import (
+            get_binance_connector, get_bybit_connector,
+            PhantomConnector, MetaMaskConnector
+        )
+
+        if amount < 0.01:  # 최소 인출액
+            logger.warning(f"Amount ${amount:.2f} too small for withdrawal")
+            return f"skipped_small_amount_{datetime.utcnow().timestamp()}"
+
+        try:
+            if vault_type == VaultType.BINANCE_PROFIT:
+                connector = get_binance_connector()
+                result = await connector.withdraw_to_subaccount(
+                    asset="USDT",
+                    amount=amount,
+                    subaccount_email=self.binance_profit_subaccount
+                )
+                if result.get('success'):
+                    logger.info(f"✅ Binance profit withdrawn: ${amount:.2f} → {self.binance_profit_subaccount}")
+                    return result.get('tx_id', f"binance_{datetime.utcnow().timestamp()}")
+                else:
+                    raise Exception(result.get('error', 'Unknown error'))
+
+            elif vault_type == VaultType.BYBIT_PROFIT:
+                connector = get_bybit_connector()
+                # Bybit는 출금 주소로 직접 전송
+                result = await connector.withdraw_to_profit_wallet(
+                    coin="USDT",
+                    amount=amount,
+                    address=self.phantom_master_address,  # 또는 별도 Bybit 수익 지갑
+                    chain="SOL"
+                )
+                if result.get('success'):
+                    logger.info(f"✅ Bybit profit withdrawn: ${amount:.2f}")
+                    return result.get('tx_id', f"bybit_{datetime.utcnow().timestamp()}")
+                else:
+                    raise Exception(result.get('error', 'Unknown error'))
+
+            elif vault_type == VaultType.PHANTOM_MASTER:
+                connector = PhantomConnector()
+                # Solana 전송은 개인키 필요하므로 일단 기록만
+                result = await connector.transfer_to_master(
+                    from_wallet="bot_wallet",
+                    amount_sol=amount / 80  # SOL 가격 대략 $80 가정
+                )
+                logger.info(f"📝 Phantom transfer logged: ${amount:.2f} (manual signing required)")
+                return result.get('tx_hash', f"phantom_pending_{datetime.utcnow().timestamp()}")
+
+            elif vault_type == VaultType.METAMASK_PROFIT:
+                connector = MetaMaskConnector()
+                # Polygon 전송은 개인키 필요하므로 일단 기록만
+                result = await connector.transfer_profit(
+                    from_wallet="bot_wallet",
+                    amount_usdc=amount
+                )
+                logger.info(f"📝 MetaMask transfer logged: ${amount:.2f} (manual signing required)")
+                return result.get('tx_hash', f"metamask_pending_{datetime.utcnow().timestamp()}")
+
+            else:
+                raise ValueError(f"Unknown vault type: {vault_type}")
+
+        except Exception as e:
+            logger.error(f"❌ Withdrawal failed for {bot_id}: {e}")
+            raise
 
     async def _get_bot_base_capital(self, bot_id: str) -> float:
         """봇 원금 조회"""
-        # run_all_bots.py의 BOT_CONFIGS에서 조회
-        from ...department_7.src.bot.run_all_bots import BOT_CONFIGS
-
-        for config in BOT_CONFIGS:
-            if config['id'] == bot_id:
-                return config['kwargs'].get('capital', 0)
-
+        try:
+            import importlib.util, os
+            run_all_path = os.path.join(
+                os.path.dirname(__file__), "..", "..", "..",
+                "department_7", "src", "bot", "run_all_bots.py"
+            )
+            spec = importlib.util.spec_from_file_location("run_all_bots", run_all_path)
+            mod = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(mod)
+            for config in mod.BOT_CONFIGS:
+                if config['id'] == bot_id:
+                    return config['kwargs'].get('capital', config['kwargs'].get('capital_sol', 0))
+        except Exception as e:
+            logger.warning(f"Failed to load BOT_CONFIGS: {e}")
         return 0.0
 
     async def _get_bot_current_balance_from_exchange(self, bot_id: str) -> Optional[Dict]:
@@ -315,16 +382,8 @@ class MasterVaultManager:
             logger.error(f"Failed to save vault records: {e}")
 
     async def reinvest_to_bot(self, bot_id: str, amount: float) -> bool:
-        """
-        마스터 금고에서 봇에 재투자
-
-        ⚠️ 사용자 명시적 승인 필요
-        """
-        # TODO: 사용자 승인 체크
-        # TODO: 실제 이체 로직
-
-        logger.info(f"💰 Reinvest ${amount} to {bot_id}")
-        return True
+        """재투자 — CEO 명시적 명령 없이는 절대 실행 안 됨"""
+        raise PermissionError("수익 재투자는 CEO 직접 명령 필요. 자동 실행 금지.")
 
 
 # 싱글톤 인스턴스

@@ -60,6 +60,20 @@ class HealthChecker:
             logger.error(f"Failed to initialize Netdata: {e}")
             self._use_netdata = False
 
+    def register_service(self, name: str, url: str, check_type: str = "http", **kwargs):
+        """서비스 등록 (호환성 메서드)"""
+        self._service_checks[name] = {
+            "enabled": True,
+            "url": url,
+            "check_type": check_type,
+            **kwargs,
+        }
+
+    @property
+    def services(self) -> dict:
+        """등록된 서비스 목록 (호환성 프로퍼티)"""
+        return self._service_checks
+
     def check_system_resources(self) -> ResourceMetrics:
         """
         시스템 리소스 체크 (Netdata 우선, fallback psutil)
@@ -336,3 +350,16 @@ def init_health_checker(
         netdata_host=netdata_host
     )
     return _health_checker_instance
+
+
+# 호환성 별칭
+from dataclasses import dataclass as _dc
+from typing import Any as _Any
+
+@_dc
+class ServiceHealth:
+    """서비스 헬스 상태 (호환성 별칭)"""
+    name: str
+    healthy: bool
+    message: str = ""
+    details: _Any = None

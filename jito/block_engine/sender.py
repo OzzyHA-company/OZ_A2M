@@ -167,19 +167,22 @@ class AntColonyMEVProtector:
 class JitoBlockEngineSender:
     """
     Jito Block Engine Bundle Sender with Ant-Colony
+    Uses RPC Manager for failover (Alchemy -> Chainstack -> Ankr)
     """
 
     def __init__(
         self,
         block_engine_url: str = "mainnet.block-engine.jito.wtf",
         auth_keypair: Optional[Keypair] = None,
-        rpc_url: str = "https://api.mainnet-beta.solana.com",
+        rpc_url: Optional[str] = None,  # Deprecated: use rpc_manager instead
         num_builders: int = 3,
         num_protectors: int = 2,
+        rpc_manager=None,  # New: RPCManager instance for failover
     ):
         self.block_engine_url = block_engine_url
         self.auth_keypair = auth_keypair or Keypair()
-        self.rpc_url = rpc_url
+        self._rpc_url = rpc_url  # Fallback if no rpc_manager
+        self.rpc_manager = rpc_manager  # New failover manager
         self.connection: Optional[AsyncClient] = None
         self.grpc_channel: Optional[grpc.aio.Channel] = None
 
@@ -202,8 +205,20 @@ class JitoBlockEngineSender:
         """Initialize connections"""
         logger.info(f"Connecting to Block Engine: {self.block_engine_url}")
 
-        # Initialize Solana RPC connection
-        self.connection = AsyncClient(self.rpc_url, commitment=Confirmed)
+        # Initialize Solana RPC connection with failover
+        if self.rpc_manager:
+            # Use RPC Manager (Alchemy -> Chainstack -> Ankr)
+            primary = self.rpc_manager.get_primary()
+            if primary:
+                rpc_url = primary.http_url
+                logger.info(f"Using RPC endpoint: {primary.name}")
+            else:
+                rpc_url = self._rpc_url or "https://api.mainnet-beta.solana.com"
+                logger.warning(f"No healthy RPC endpoint, using fallback: {rpc_url}")
+        else:
+            rpc_url = self._rpc_url or "https://api.mainnet-beta.solana.com"
+
+        self.connection = AsyncClient(rpc_url, commitment=Confirmed)
 
         # Initialize gRPC channel (placeholder for actual implementation)
         # self.grpc_channel = grpc.aio.insecure_channel(self.block_engine_url)
@@ -332,14 +347,25 @@ class JitoBlockEngineSender:
             return await self._fallback_send(bundle)
 
     async def _fallback_send(self, bundle: Bundle) -> bool:
-        """Fallback: send first transaction via standard Solana RPC"""
+        """Fallback: send first transaction via standard Solana RPC with failover"""
         try:
             if not bundle.transactions:
                 return False
             tx = bundle.transactions[0]
             tx_bytes = base64.b64encode(bytes(tx)).decode()
             import httpx
-            rpc_url = self.rpc_url
+
+            # Get RPC URL with failover priority
+            if self.rpc_manager:
+                healthy = self.rpc_manager.get_healthy_endpoints()
+                if healthy:
+                    rpc_url = healthy[0].http_url
+                    logger.info(f"Fallback using RPC endpoint: {healthy[0].name}")
+                else:
+                    rpc_url = self._rpc_url or "https://api.mainnet-beta.solana.com"
+            else:
+                rpc_url = self._rpc_url or "https://api.mainnet-beta.solana.com"
+
             payload = {
                 "jsonrpc": "2.0", "id": 1,
                 "method": "sendTransaction",
@@ -362,14 +388,35 @@ class JitoBlockEngineSender:
 
 
 async def main():
-    """Test the sender"""
-    sender = JitoBlockEngineSender()
+    """Test the sender with RPC Manager"""
+    from shared.rpc_manager import SolanaRPCManager, load_from_env, RPCEndpoint
+
+    # Load RPC endpoints from environment
+    endpoints = load_from_env()
+    if not endpoints:
+        logger.warning("No RPC endpoints configured, using defaults")
+        endpoints = [
+            RPCEndpoint(
+                name="alchemy",
+                http_url="https://solana-mainnet.g.alchemy.com/v2/demo",
+                priority=1
+            ),
+        ]
+
+    # Initialize RPC Manager
+    rpc_manager = SolanaRPCManager(endpoints)
+    await rpc_manager.start()
+
+    # Create sender with RPC Manager
+    sender = JitoBlockEngineSender(rpc_manager=rpc_manager)
 
     try:
         await sender.start()
 
-        # Test with dummy transaction
-        # In production, these would be real transactions
+        # Print RPC status
+        status = rpc_manager.get_status()
+        logger.info(f"RPC Status: {status}")
+
         logger.info("Sender ready. Waiting for bundles...")
 
         await asyncio.sleep(60)
@@ -378,6 +425,7 @@ async def main():
         logger.info("Stopping...")
     finally:
         await sender.stop()
+        await rpc_manager.stop()
 
 
 if __name__ == "__main__":

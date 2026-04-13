@@ -9,7 +9,7 @@ services:
       --block-engine-url https://mainnet.block-engine.jito.wtf
       --auth-keypair /app/keypair.json
       --desired-regions amsterdam,ny,tokyo
-      --dest-ip-ports 127.0.0.1:10000
+      --dest-ip-ports 127.0.0.1:20000
     network_mode: host
     logging:
       driver: "json-file"

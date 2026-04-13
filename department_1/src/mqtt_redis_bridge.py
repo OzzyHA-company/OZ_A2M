@@ -23,7 +23,7 @@ class MqttRedisBridge:
         mqtt_host: str = "localhost",
         mqtt_port: int = 1883,
         redis_host: str = "localhost",
-        redis_port: int = 6379
+        redis_port: int = 6380
     ):
         self.mqtt = get_mqtt_client()
         self.redis = get_redis_cache(host=redis_host, port=redis_port)

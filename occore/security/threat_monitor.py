@@ -489,3 +489,13 @@ def get_threat_monitor() -> ThreatMonitor:
     if _threat_monitor_instance is None:
         _threat_monitor_instance = ThreatMonitor()
     return _threat_monitor_instance
+
+
+# 호환성 별칭
+from enum import Enum
+
+class ThreatLevel(Enum):
+    LOW = "low"
+    MEDIUM = "medium"
+    HIGH = "high"
+    CRITICAL = "critical"

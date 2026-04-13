@@ -37,7 +37,7 @@ class Phase7Tester:
 
         try:
             # Test Master-1
-            r = redis.Redis(host='localhost', port=6379, decode_responses=True)
+            r = redis.Redis(host='localhost', port=6380, decode_responses=True)
             r.ping()
             self.log("Redis Master-1 연결")
 

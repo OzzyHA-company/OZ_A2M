@@ -35,6 +35,13 @@ try:
 except ImportError:
     JITO_AVAILABLE = False
 
+# RPC Manager for failover (Alchemy -> Chainstack -> Ankr)
+try:
+    from shared.rpc_manager import SolanaRPCManager, load_from_env
+    RPC_MANAGER_AVAILABLE = True
+except ImportError:
+    RPC_MANAGER_AVAILABLE = False
+
 from lib.core.logger import get_logger
 from lib.messaging.mqtt_client import MQTTClient, MQTTConfig
 from lib.messaging.event_bus import EventBus, get_event_bus
@@ -101,7 +108,8 @@ class PumpSniperBot:
         mock_mode: bool = False,
         mqtt_host: str = "localhost",
         mqtt_port: int = 1883,
-        telegram_alerts: bool = True
+        telegram_alerts: bool = True,
+        use_rpc_manager: bool = True,  # New: use RPC Manager for failover
     ):
         self.bot_id = bot_id
         self.capital_sol = capital_sol
@@ -111,6 +119,7 @@ class PumpSniperBot:
         self.max_slippage = max_slippage
         self.mock_mode = mock_mode
         self.telegram_alerts = telegram_alerts
+        self.use_rpc_manager = use_rpc_manager and RPC_MANAGER_AVAILABLE
 
         # 상태
         self.status = SniperStatus.IDLE
@@ -126,26 +135,36 @@ class PumpSniperBot:
         # EventBus
         self.event_bus: Optional[EventBus] = None
 
+        # RPC Manager (Alchemy -> Chainstack -> Ankr failover)
+        self.rpc_manager: Optional[Any] = None
+
         # Telegram
         self.telegram_bot_token = os.environ.get("TELEGRAM_BOT_TOKEN")
         self.telegram_chat_id = os.environ.get("TELEGRAM_CHAT_ID")
 
-        # QuickNode (HTTP + WSS URL 지원)
-        self.quicknode_http_url = os.environ.get("QUICKNODE_HTTP_URL")
-        self.quicknode_ws_url = os.environ.get("QUICKNODE_WSS_URL")
+        # QuickNode (HTTP + WSS URL 지원) — trailing space 제거
+        self.quicknode_http_url = (os.environ.get("QUICKNODE_HTTP_URL") or "").strip() or None
+        self.quicknode_ws_url = (os.environ.get("QUICKNODE_WSS_URL") or "").strip() or None
         # WSS가 없으면 HTTP에서 변환
         if not self.quicknode_ws_url and self.quicknode_http_url:
             self.quicknode_ws_url = self.quicknode_http_url.replace("https://", "wss://")
 
         # Alchemy/Infura (GitHub Student Pack 권장)
-        self.alchemy_http_url = os.environ.get("ALCHEMY_SOLANA_HTTP_URL")
-        self.alchemy_ws_url = os.environ.get("ALCHEMY_SOLANA_WSS_URL")
-        self.infura_http_url = os.environ.get("INFURA_SOLANA_HTTP_URL")
-        self.infura_ws_url = os.environ.get("INFURA_SOLANA_WSS_URL")
+        self.alchemy_http_url = (os.environ.get("ALCHEMY_SOLANA_HTTP_URL") or "").strip() or None
+        self.alchemy_ws_url = (os.environ.get("ALCHEMY_SOLANA_WSS_URL") or "").strip() or None
+        self.infura_http_url = (os.environ.get("INFURA_SOLANA_HTTP_URL") or "").strip() or None
+        self.infura_ws_url = (os.environ.get("INFURA_SOLANA_WSS_URL") or "").strip() or None
 
-        # Helius (fallback용)
-        self.helius_http_url = os.environ.get("HELIUS_RPC_URL")
-        self.helius_ws_url = os.environ.get("HELIUS_WSS_URL")
+        # Helius — API 키에서 WSS URL 자동 생성
+        self.helius_http_url = (os.environ.get("HELIUS_RPC_URL") or "").strip() or None
+        helius_key = (os.environ.get("HELIUS_API_KEY") or "").strip()
+        self.helius_ws_url = (
+            (os.environ.get("HELIUS_WSS_URL") or "").strip()
+            or (f"wss://mainnet.helius-rpc.com/?api-key={helius_key}" if helius_key else None)
+        )
+
+        # Chainstack WSS (master.env에 있음)
+        self.chainstack_ws_url = (os.environ.get("CHAINSTACK_SOLANA_WSS") or "").strip() or None
 
         # Jito 파이프라인 (Data In: Shredstream, Data Out: Block Engine)
         self.jito_proxy: Optional[Any] = None
@@ -179,8 +198,49 @@ class PumpSniperBot:
         """.env에서 Phantom 지갑 주소 로드"""
         return os.environ.get("PHANTOM_WALLET_B")
 
+    async def _update_capital_from_wallet(self):
+        """실제 Solana 지갑 잔액으로 자본 업데이트"""
+        try:
+            wallet_address = self._load_wallet()
+            if not wallet_address:
+                logger.warning("No wallet address configured, using default capital")
+                return
+
+            rpc_url = self._get_best_rpc_url()
+            if not rpc_url:
+                logger.warning("No RPC URL available, using default capital")
+                return
+
+            from solana.rpc.async_api import AsyncClient
+            from solders.pubkey import Pubkey
+            async with AsyncClient(rpc_url) as client:
+                # 문자열을 Pubkey 객체로 변환
+                pubkey = Pubkey.from_string(wallet_address)
+                response = await client.get_balance(pubkey)
+                if response.value is not None:
+                    balance_sol = response.value / 1e9  # lamports to SOL
+                    # 자본을 실제 잔액의 90%로 설정 (수수료 여유)
+                    self.capital_sol = min(balance_sol * 0.9, self.capital_sol)
+                    logger.info(f"✅ Capital updated from wallet: {self.capital_sol:.3f} SOL (balance: {balance_sol:.3f} SOL)")
+                else:
+                    logger.warning("Failed to get wallet balance, using default capital")
+        except Exception as e:
+            logger.warning(f"Failed to update capital from wallet: {e}, using default capital")
+
     def _get_best_rpc_url(self) -> Optional[str]:
-        """최선의 RPC URL 반환 (Alchemy → Infura → Helius → QuickNode → 공식 RPC)"""
+        """최선의 RPC URL 반환 (RPC Manager → Legacy fallback)"""
+        # Use RPC Manager if available (auto-failover: Alchemy → Chainstack → Ankr)
+        if self.use_rpc_manager and self.rpc_manager:
+            primary = self.rpc_manager.get_primary()
+            if primary:
+                logger.debug(f"Using RPC endpoint: {primary.name}")
+                return primary.http_url
+            healthy = self.rpc_manager.get_healthy_endpoints()
+            if healthy:
+                logger.debug(f"Using fallback RPC: {healthy[0].name}")
+                return healthy[0].http_url
+
+        # Legacy fallback (환경변수에서 직접 조회)
         if self.alchemy_http_url:
             return self.alchemy_http_url
         if self.infura_http_url:
@@ -207,6 +267,23 @@ class PumpSniperBot:
         """봇 초기화"""
         self.wallet_address = self._load_wallet()
 
+        # Initialize RPC Manager for failover (Alchemy -> Chainstack -> Ankr)
+        if self.use_rpc_manager:
+            try:
+                endpoints = load_from_env()
+                if endpoints:
+                    self.rpc_manager = SolanaRPCManager(endpoints)
+                    await self.rpc_manager.start()
+                    logger.info(f"✅ RPC Manager started with {len(endpoints)} endpoints")
+                else:
+                    logger.warning("⚠️ No RPC endpoints found, using legacy mode")
+            except Exception as e:
+                logger.error(f"⚠️ RPC Manager init failed: {e}")
+                self.use_rpc_manager = False
+
+        # 실제 지갑 잔액으로 자본 업데이트
+        await self._update_capital_from_wallet()
+
         if self.mock_mode or not self.quicknode_ws_url:
             await self._initialize_mock()
         else:
@@ -227,10 +304,11 @@ class PumpSniperBot:
 
         # 시도할 RPC 제공자 목록 (우선순위 순)
         providers = [
+            ("Helius", self.helius_ws_url),
+            ("Chainstack", self.chainstack_ws_url),
+            ("QuickNode", self.quicknode_ws_url),
             ("Alchemy", self.alchemy_ws_url),
             ("Infura", self.infura_ws_url),
-            ("Helius", self.helius_ws_url),
-            ("QuickNode", self.quicknode_ws_url),
         ]
 
         for provider_name, ws_url in providers:
@@ -276,12 +354,11 @@ class PumpSniperBot:
                 return
 
             except Exception as e:
-                logger.error(f"Failed to initialize QuickNode connection (attempt {attempt + 1}/{max_retries}): {e}")
-                if attempt < max_retries - 1:
-                    retry_delay *= 2  # 지수 백오프
-                else:
-                    logger.info("Falling back to mock mode")
-                    await self._initialize_mock()
+                logger.warning(f"[{provider_name}] WebSocket 연결 실패: {e}")
+
+        # 모든 provider 실패 → mock 모드
+        logger.info("모든 RPC WebSocket 실패 — mock 모드로 전환")
+        await self._initialize_mock()
 
     async def _initialize_mock(self):
         """Mock 모드 초기화"""
@@ -559,7 +636,7 @@ class PumpSniperBot:
 
             # 1. Jupiter Quote API
             async with aiohttp.ClientSession() as session:
-                quote_url = "https://quote-api.jup.ag/v6/quote"
+                quote_url = "https://lite-api.jup.ag/swap/v1/quote"
                 params = {
                     "inputMint": "So11111111111111111111111111111111111111112",  # SOL
                     "outputMint": token_address,
@@ -583,7 +660,7 @@ class PumpSniperBot:
                 buy_price = out_amount / in_amount if in_amount > 0 else 0
 
                 # 2. Swap Transaction 생성
-                swap_url = "https://quote-api.jup.ag/v6/swap"
+                swap_url = "https://lite-api.jup.ag/swap/v1/swap"
                 swap_payload = {
                     "quoteResponse": quote_resp,
                     "userPublicKey": wallet_pubkey,
@@ -844,6 +921,14 @@ class PumpSniperBot:
         # EventBus 연결 해제
         if self.event_bus:
             await self.event_bus.disconnect()
+
+        # RPC Manager 중지
+        if self.rpc_manager:
+            try:
+                await self.rpc_manager.stop()
+                logger.info("RPC Manager stopped")
+            except Exception as e:
+                logger.error(f"Error stopping RPC Manager: {e}")
 
         await self.mqtt.disconnect()
 

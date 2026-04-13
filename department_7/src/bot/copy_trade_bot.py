@@ -29,6 +29,13 @@ from lib.core.logger import get_logger
 from lib.messaging.mqtt_client import MQTTClient, MQTTConfig
 from lib.messaging.event_bus import EventBus, get_event_bus
 
+# RPC Manager for failover (Alchemy -> Chainstack -> Ankr)
+try:
+    from shared.rpc_manager import SolanaRPCManager, load_from_env, RPCError
+    RPC_MANAGER_AVAILABLE = True
+except ImportError:
+    RPC_MANAGER_AVAILABLE = False
+
 logger = get_logger(__name__)
 
 
@@ -94,6 +101,7 @@ class GMGNCopyBot:
         self.min_wallet_success_rate = min_wallet_success_rate
         self.mock_mode = mock_mode
         self.telegram_alerts = telegram_alerts
+        self._last_telegram_time = None  # Telegram throttle
 
         # 상태
         self.status = CopyStatus.IDLE
@@ -107,7 +115,10 @@ class GMGNCopyBot:
         from lib.pi_mono_bridge.ant_colony_adapter import AntColonyAdapter
         self.ant_colony = AntColonyAdapter(config={})
         self.use_ant_colony = True
-        # Legacy: Helius removed, using Ant-Colony + Jito
+
+        # RPC Manager for failover (Alchemy -> Chainstack -> Ankr)
+        self.rpc_manager: Optional[Any] = None
+        self.use_rpc_manager = RPC_MANAGER_AVAILABLE
 
         # 중복 거래 필터링
         self._seen_signatures: set = set()
@@ -126,9 +137,11 @@ class GMGNCopyBot:
         # RPC 제공자 설정 (우선순위: Alchemy → Infura → Helius)
         self.alchemy_http_url = os.environ.get("ALCHEMY_SOLANA_HTTP_URL")
         self.infura_http_url = os.environ.get("INFURA_SOLANA_HTTP_URL")
-        self.helius_http_url = os.environ.get("HELIUS_RPC_URL")
+        # Helius URL 수정: api.helius-rpc.com → api.helius.xyz
+        self.helius_http_url = os.environ.get("HELIUS_RPC_URL", "").replace("api.helius-rpc.com", "mainnet.helius-rpc.com")
         self.helius_api_key = os.environ.get("HELIUS_API_KEY")
-        self.helius_parse_url = os.environ.get("HELIUS_PARSE_TX_URL")
+        # Enhanced API는 api.helius.xyz 도메인 사용
+        self.helius_parse_url = os.environ.get("HELIUS_PARSE_TX_URL", "https://api.helius.xyz/v0")
 
         # 통계
         self.total_copies: int = 0
@@ -152,8 +165,49 @@ class GMGNCopyBot:
         """.env에서 Phantom 지갑 주소 로드"""
         return os.environ.get("PHANTOM_WALLET_C")
 
+    async def _update_capital_from_wallet(self):
+        """실제 Solana 지갑 잔액으로 자본 업데이트"""
+        try:
+            wallet_address = self._load_wallet()
+            if not wallet_address:
+                logger.warning("No wallet address configured, using default capital")
+                return
+
+            rpc_url = self._get_best_rpc_url()
+            if not rpc_url:
+                logger.warning("No RPC URL available, using default capital")
+                return
+
+            from solana.rpc.async_api import AsyncClient
+            from solders.pubkey import Pubkey
+            async with AsyncClient(rpc_url) as client:
+                # 문자열을 Pubkey 객체로 변환
+                pubkey = Pubkey.from_string(wallet_address)
+                response = await client.get_balance(pubkey)
+                if response.value is not None:
+                    balance_sol = response.value / 1e9  # lamports to SOL
+                    # 자본을 실제 잔액의 90%로 설정 (수수료 여유)
+                    self.capital_sol = min(balance_sol * 0.9, self.capital_sol)
+                    logger.info(f"✅ Capital updated from wallet: {self.capital_sol:.3f} SOL (balance: {balance_sol:.3f} SOL)")
+                else:
+                    logger.warning("Failed to get wallet balance, using default capital")
+        except Exception as e:
+            logger.warning(f"Failed to update capital from wallet: {e}, using default capital")
+
     def _get_best_rpc_url(self) -> Optional[str]:
-        """최선의 RPC URL 반환 (Alchemy → Infura → Helius → 공식 RPC)"""
+        """최선의 RPC URL 반환 (RPC Manager → Legacy fallback)"""
+        # Use RPC Manager if available (auto-failover: Alchemy → Chainstack → Ankr)
+        if self.use_rpc_manager and self.rpc_manager:
+            primary = self.rpc_manager.get_primary()
+            if primary:
+                logger.debug(f"Using RPC endpoint: {primary.name}")
+                return primary.http_url
+            healthy = self.rpc_manager.get_healthy_endpoints()
+            if healthy:
+                logger.debug(f"Using fallback RPC: {healthy[0].name}")
+                return healthy[0].http_url
+
+        # Legacy fallback (환경변수에서 직접 조회)
         if self.alchemy_http_url:
             return self.alchemy_http_url
         if self.infura_http_url:
@@ -164,21 +218,36 @@ class GMGNCopyBot:
 
     def _load_tracked_wallets(self) -> List[str]:
         """추적할 스마트머니 지갑 목록"""
-        # 기본 스마트머니 지갑 (예시)
-        default_wallets = [
-            "5Q544fKrFoe6tsEbD7S8EmxGTJYAKtTVbNUqSJG5",  # 예시
-        ]
+        # 추적 지갑은 환경변수로만 설정 (TRACKED_WALLETS=addr1,addr2,...)
+        default_wallets = []
 
-        # 환경변수에서 추가 지갑 로드
+        # 환경변수에서 추적 지갑 로드
         env_wallets = os.environ.get("TRACKED_WALLETS", "")
         if env_wallets:
-            default_wallets.extend(env_wallets.split(","))
+            default_wallets.extend([w.strip() for w in env_wallets.split(",") if w.strip()])
 
         return default_wallets
 
     async def initialize(self):
         """봇 초기화"""
         self.wallet_address = self._load_wallet()
+
+        # Initialize RPC Manager for failover (Alchemy -> Chainstack -> Ankr)
+        if self.use_rpc_manager:
+            try:
+                endpoints = load_from_env()
+                if endpoints:
+                    self.rpc_manager = SolanaRPCManager(endpoints)
+                    await self.rpc_manager.start()
+                    logger.info(f"✅ RPC Manager started with {len(endpoints)} endpoints")
+                else:
+                    logger.warning("⚠️ No RPC endpoints found, using legacy mode")
+            except Exception as e:
+                logger.error(f"⚠️ RPC Manager init failed: {e}")
+                self.use_rpc_manager = False
+
+        # 실제 지갑 잔액으로 자본 업데이트
+        await self._update_capital_from_wallet()
 
         # 추적할 지갑 설정
         wallet_addresses = self._load_tracked_wallets()
@@ -191,7 +260,9 @@ class GMGNCopyBot:
                 added_at=datetime.utcnow()
             )
 
-        if self.mock_mode or not self.helius_parse_url:
+        if self.mock_mode or not self.helius_parse_url or not self.tracked_wallets:
+            if not self.tracked_wallets:
+                logger.warning("추적 지갑 없음 — TRACKED_WALLETS 환경변수를 설정하세요. Mock 모드로 전환")
             await self._initialize_mock()
         else:
             await self._initialize_live()
@@ -291,7 +362,7 @@ class GMGNCopyBot:
                 logger.error(f"Error monitoring wallet {address}: {e}")
 
     async def _fetch_wallet_transactions(self, wallet_address: str) -> List[Dict]:
-        """지갑 거래 내역 조회 - Helius Enhanced Transaction API"""
+        """지갑 거래 내역 조회 - Helius Enhanced Transaction API with RPC failover"""
         if self.mock_mode:
             # Mock 거래 데이터
             import random
@@ -306,62 +377,126 @@ class GMGNCopyBot:
                 }]
             return []
 
-        # Helius API로 거래 내역 조회
+        # Try Helius Enhanced API first, then fallback to RPC methods
         import aiohttp
 
+        api_key = self.helius_api_key or os.environ.get("ANT_COLONY_API_KEY")
+        if not api_key:
+            logger.warning("ANT_COLONY_API_KEY not set, trying RPC fallback")
+            return await self._fetch_transactions_via_rpc(wallet_address)
+
+        # Helius Enhanced API 시도 (api.helius.xyz 사용)
+        helius_url = f"https://api.helius.xyz/v0/addresses/{wallet_address}/transactions"
+
         try:
-            api_key = self.helius_api_key or os.environ.get("ANT_COLONY_API_KEY")
-            if not api_key:
-                logger.warning("ANT_COLONY_API_KEY not set")
-                return []
-
-            helius_url = f"https://api.mainnet-beta.solana.com/v0/addresses/{wallet_address}/transactions"
-
             async with aiohttp.ClientSession() as session:
                 params = {"api-key": api_key, "limit": 10}
                 async with session.get(helius_url, params=params) as resp:
-                    if resp.status != 200:
-                        logger.warning(f"Helius API error: {resp.status}")
-                        return []
+                    if resp.status == 429:
+                        logger.warning("Helius API rate limit exceeded, trying RPC fallback")
+                        return await self._fetch_transactions_via_rpc(wallet_address)
+                    elif resp.status == 400:
+                        body = await resp.text()
+                        if "max usage" in body.lower():
+                            logger.warning("Helius API quota exhausted, trying RPC fallback")
+                            return await self._fetch_transactions_via_rpc(wallet_address)
+                        else:
+                            logger.warning(f"Helius API error 400: {body[:100]}, trying RPC fallback")
+                            return await self._fetch_transactions_via_rpc(wallet_address)
+                    elif resp.status != 200:
+                        logger.warning(f"Helius API error: {resp.status}, trying RPC fallback")
+                        return await self._fetch_transactions_via_rpc(wallet_address)
 
                     txs = await resp.json()
                     if not isinstance(txs, list):
-                        logger.warning(f"Unexpected Helius response format")
-                        return []
+                        logger.warning(f"Unexpected Helius response format, trying RPC fallback")
+                        return await self._fetch_transactions_via_rpc(wallet_address)
 
-                    parsed_txs = []
-                    for tx in txs:
-                        # tokenTransfers에서 스왑 정보 추출
-                        token_transfers = tx.get("tokenTransfers", [])
-                        native_transfers = tx.get("nativeTransfers", [])
-
-                        if token_transfers:
-                            # 첫 번째 토큰 전송을 기준으로 side 결정
-                            first_transfer = token_transfers[0]
-                            from_addr = first_transfer.get("fromUserAccount", "")
-                            to_addr = first_transfer.get("toUserAccount", "")
-                            token_addr = first_transfer.get("mint", "")
-                            amount = first_transfer.get("tokenAmount", 0)
-
-                            # side 결정: 추적 지갑이 받으면 buy, 본면 sell
-                            side = "buy" if to_addr.lower() == wallet_address.lower() else "sell"
-
-                            parsed_txs.append({
-                                "signature": tx.get("signature", ""),
-                                "token": token_addr[:8] + "..." if len(token_addr) > 8 else token_addr,
-                                "token_address": token_addr,
-                                "side": side,
-                                "amount": float(amount) if amount else 0,
-                                "price": 0,  # 가격은 별도 조회 필요
-                                "timestamp": tx.get("timestamp", 0),
-                                "description": tx.get("description", "")
-                            })
-
-                    return parsed_txs
+                    return self._parse_helius_transactions(txs, wallet_address)
 
         except Exception as e:
-            logger.error(f"Error fetching transactions: {e}")
+            logger.error(f"Error fetching from Helius: {e}, trying RPC fallback")
+            return await self._fetch_transactions_via_rpc(wallet_address)
+
+    async def _fetch_transactions_via_rpc(self, wallet_address: str) -> List[Dict]:
+        """RPC를 통한 거래 내역 조회 (Helius 실패 시 fallback)"""
+        try:
+            from solana.rpc.async_api import AsyncClient
+
+            rpc_url = self._get_best_rpc_url()
+            if not rpc_url:
+                logger.error("No RPC URL available for fallback")
+                return []
+
+            async with AsyncClient(rpc_url) as client:
+                # 최근 서명 조회
+                response = await client.get_signatures_for_address(
+                    wallet_address,
+                    limit=10
+                )
+
+                if not response.value:
+                    return []
+
+                transactions = []
+                for sig_info in response.value:
+                    # 각 서명에 대한 거래 상세 정보 조회
+                    tx_response = await client.get_transaction(
+                        sig_info.signature,
+                        encoding="jsonParsed"
+                    )
+
+                    if tx_response.value:
+                        tx_data = tx_response.value
+                        # 간단한 거래 정보 추출
+                        transactions.append({
+                            "signature": sig_info.signature,
+                            "token": "UNKNOWN",
+                            "token_address": "",
+                            "side": "unknown",
+                            "amount": 0,
+                            "price": 0,
+                            "timestamp": tx_data.block_time or 0,
+                            "description": "RPC fetched transaction"
+                        })
+
+                return transactions
+
+        except Exception as e:
+            logger.error(f"RPC fallback also failed: {e}")
             return []
+
+    def _parse_helius_transactions(self, txs: List[Dict], wallet_address: str) -> List[Dict]:
+        """Helius 응답 파싱"""
+        parsed_txs = []
+        for tx in txs:
+            # tokenTransfers에서 스왑 정보 추출
+            token_transfers = tx.get("tokenTransfers", [])
+            native_transfers = tx.get("nativeTransfers", [])
+
+            if token_transfers:
+                # 첫 번째 토큰 전송을 기준으로 side 결정
+                first_transfer = token_transfers[0]
+                from_addr = first_transfer.get("fromUserAccount", "")
+                to_addr = first_transfer.get("toUserAccount", "")
+                token_addr = first_transfer.get("mint", "")
+                amount = first_transfer.get("tokenAmount", 0)
+
+                # side 결정: 추적 지갑이 받으면 buy, 보내면 sell
+                side = "buy" if to_addr.lower() == wallet_address.lower() else "sell"
+
+                parsed_txs.append({
+                    "signature": tx.get("signature", ""),
+                    "token": token_addr[:8] + "..." if len(token_addr) > 8 else token_addr,
+                    "token_address": token_addr,
+                    "side": side,
+                    "amount": float(amount) if amount else 0,
+                    "price": 0,  # 가격은 별도 조회 필요
+                    "timestamp": tx.get("timestamp", 0),
+                    "description": tx.get("description", "")
+                })
+
+        return parsed_txs
 
     def _is_new_trade(self, transaction: Dict) -> bool:
         """새로운 거래 여부 확인 - 중복 필터링"""
@@ -443,7 +578,7 @@ class GMGNCopyBot:
 
             async with aiohttp.ClientSession() as session:
                 # 1. Quote
-                quote_url = "https://quote-api.jup.ag/v6/quote"
+                quote_url = "https://lite-api.jup.ag/swap/v1/quote"
                 params = {
                     "inputMint": input_mint,
                     "outputMint": output_mint,
@@ -468,7 +603,7 @@ class GMGNCopyBot:
                 price = out_amt / in_amt if in_amt > 0 else 0
 
                 # 2. Swap transaction
-                swap_url = "https://quote-api.jup.ag/v6/swap"
+                swap_url = "https://lite-api.jup.ag/swap/v1/swap"
                 swap_payload = {
                     "quoteResponse": quote_resp,
                     "userPublicKey": wallet_pubkey,
@@ -493,7 +628,7 @@ class GMGNCopyBot:
             signed_tx = VersionedTransaction(tx.message, [keypair])
 
             rpc_url = self._get_best_rpc_url()
-            if not helius_url:
+            if not rpc_url:
                 logger.error("SOLANA_RPC_URL / HELIUS_RPC_URL not set")
                 return
 
@@ -595,7 +730,7 @@ class GMGNCopyBot:
 
             # Solana RPC 연결
             rpc_url = self._get_best_rpc_url()
-            if not helius_url:
+            if not rpc_url:
                 logger.error("SOLANA_RPC_URL / HELIUS_RPC_URL not set")
                 return False
 
@@ -650,6 +785,14 @@ class GMGNCopyBot:
         if self.event_bus:
             await self.event_bus.disconnect()
 
+        # RPC Manager 중지
+        if self.rpc_manager:
+            try:
+                await self.rpc_manager.stop()
+                logger.info("RPC Manager stopped")
+            except Exception as e:
+                logger.error(f"Error stopping RPC Manager: {e}")
+
         await self.mqtt.disconnect()
 
         # 리포트 발송
@@ -658,9 +801,15 @@ class GMGNCopyBot:
         logger.info(f"GMGN copy bot {self.bot_id} stopped")
 
     async def _send_telegram_notification(self, message: str):
-        """Telegram 알림 발송"""
+        """Telegram 알림 발송 (5초 throttle)"""
         if not self.telegram_alerts or not self.telegram_bot_token or not self.telegram_chat_id:
             return
+
+        from datetime import datetime
+        now = datetime.utcnow()
+        if self._last_telegram_time:
+            if (now - self._last_telegram_time).total_seconds() < 5.0:
+                return
 
         try:
             import aiohttp
@@ -672,7 +821,9 @@ class GMGNCopyBot:
             }
             async with aiohttp.ClientSession() as session:
                 async with session.post(url, json=payload) as resp:
-                    if resp.status != 200:
+                    if resp.status == 200:
+                        self._last_telegram_time = now
+                    else:
                         logger.warning(f"Telegram notification failed: {resp.status}")
         except Exception as e:
             logger.error(f"Failed to send Telegram notification: {e}")

@@ -244,3 +244,7 @@ def init_calculator(config: Optional[Dict[str, Any]] = None) -> ProfitCalculator
     global _calculator_instance
     _calculator_instance = ProfitCalculator(config=config)
     return _calculator_instance
+
+
+# 호환성 별칭
+PnLCalculator = ProfitCalculator

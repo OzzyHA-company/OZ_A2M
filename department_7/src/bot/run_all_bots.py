@@ -100,7 +100,7 @@ BOT_CONFIGS = [
             'bot_id': 'dca_binance_001',
             'symbol': 'SOL/USDT',
             'exchange_id': 'binance',
-            'capital': 13.0,  # 2026-04-02 업데이트: $32.71 재분배
+            'capital': 13.9,  # 2026-04-08 업데이트: Binance $35.03 재분배
             'dca_drop_pct': 0.02,
             'take_profit_pct': 0.03,
             'sandbox': False,
@@ -116,7 +116,7 @@ BOT_CONFIGS = [
             'bot_id': 'grid_binance_001',
             'symbol': 'SOL/USDT',
             'exchange_id': 'binance',
-            'capital': 10.0,  # 2026-04-02 업데이트: $32.71 재분배
+            'capital': 10.7,  # 2026-04-08 업데이트: Binance $35.03 재분배
             'grid_count': 20,
             'grid_spacing_pct': 0.005,
             'sandbox': False,
@@ -131,7 +131,7 @@ BOT_CONFIGS = [
         'kwargs': {
             'bot_id': 'triarb_binance_001',
             'exchange_id': 'binance',
-            'capital': 9.71,  # 2026-04-02 업데이트: $32.71 재분배 (13+10+9.71=32.71)
+            'capital': 10.43,  # 2026-04-08 업데이트: Binance $35.03 재분배 (13.9+10.7+10.43=35.03)
             'min_profit_pct': 0.001,
             'sandbox': False,
             'telegram_alerts': True
@@ -144,7 +144,7 @@ BOT_CONFIGS = [
         'class': FundingRateBot,
         'kwargs': {
             'bot_id': 'funding_binance_bybit_001',
-            'capital': 5.00,  # 2026-04-02 업데이트: $23.32 재분배
+            'capital': 5.47,  # 2026-04-08 업데이트: Bybit $25.53 재분배
             'min_funding_rate': 0.0001,
             'sandbox': False,
             'telegram_alerts': True
@@ -159,7 +159,7 @@ BOT_CONFIGS = [
             'bot_id': 'grid_bybit_001',
             'symbol': 'SOL/USDT',
             'exchange_id': 'bybit',
-            'capital': 10.32,  # 2026-04-02 업데이트: $23.32 재분배 (5+10.32+8=23.32)
+            'capital': 11.30,  # 2026-04-08 업데이트: Bybit $25.53 재분배 (5.47+11.30+8.76=25.53)
             'grid_count': 15,
             'grid_spacing_pct': 0.005,
             'sandbox': False,
@@ -175,7 +175,7 @@ BOT_CONFIGS = [
             'bot_id': 'scalper_bybit_001',
             'symbol': 'SOL/USDT',
             'exchange_id': 'bybit',
-            'capital': 8.00,  # 2026-04-02 유지
+            'capital': 8.76,  # 2026-04-08 업데이트: Bybit $25.53 재분배
             'sandbox': False,
             'telegram_alerts': True
         }
@@ -188,8 +188,7 @@ BOT_CONFIGS = [
         'kwargs': {
             'bot_id': 'hyperliquid_mm_001',
             'symbol': 'SOL-PERP',
-            'capital': 4.43,  # 2026-04-02: Phantom A $4.44 SOL - $0.01 사용분
-            'base_spread_bps': 10.0,
+            'capital': 4.69,  # 2026-04-08: Phantom A $4.69
             'sandbox': False,
             'mock_mode': False,
             'telegram_alerts': True
@@ -215,7 +214,7 @@ BOT_CONFIGS = [
         'class': PolymarketAIBot,
         'kwargs': {
             'bot_id': 'polymarket_ai_001',
-            'capital': 19.84,  # MetaMask (Polygon) USDC 자본
+            'capital': 19.85,  # 2026-04-08: MetaMask USDC 실잔액
             'min_edge': 0.05,
             'mock_mode': False,
             'telegram_alerts': True
@@ -362,8 +361,39 @@ async def stop_all_bots():
     logger.info("All bots stopped")
 
 
+async def check_and_retire_bots():
+    """HP 0 봇 자동 폐기 — 수익 못 내는 봇은 멈추고 자본 금고로"""
+    try:
+        from lib.core.reward_system.rpg_system import RPGSystem
+        from lib.core.profit.vault_manager import get_vault_manager
+
+        rpg = RPGSystem()
+        vault = get_vault_manager()
+        to_retire = []
+
+        for bot_id, bot in list(bots.items()):
+            state = rpg.get_or_create_state(bot_id)
+            if state.hp.current <= 0 and not state.is_retired:
+                to_retire.append((bot_id, bot, state))
+
+        for bot_id, bot, state in to_retire:
+            logger.warning(f"[HP=0] {bot_id} — 봇 중지")
+
+            if hasattr(bot, '_safe_stop'):
+                await bot._safe_stop()
+            elif hasattr(bot, 'stop'):
+                await bot.stop()
+
+            logger.warning(f"[중지 완료] {bot_id}")
+
+    except Exception as e:
+        logger.error(f"retire check error: {e}")
+
+
 async def print_status():
-    """전체 봇 상태 출력"""
+    """전체 봇 상태 출력 + HP 0 폐기 체크"""
+    await check_and_retire_bots()
+
     print("\n" + "="*60)
     print("📊 OZ_A2M 전체 봇 상태")
     print("="*60)
@@ -418,24 +448,25 @@ async def run_all():
     print(f"[Bybit]   USDT: ${bybit_balance.get('usdt_free', 0):.2f} | SOL: {bybit_balance.get('sol_free', 0):.4f} (${bybit_balance.get('sol_value_usd', 0):.2f})")
     print("-"*60)
     
-    # 봇 자본 설정 조정
-    binance_available = binance_balance.get('usdt_free', 0)
-    bybit_available = bybit_balance.get('usdt_free', 0)
-    
+    # 봇 자본 설정 조정 — USDT + SOL 환산 총액 기준
+    binance_total = binance_balance.get('usdt_free', 0) + binance_balance.get('sol_value_usd', 0)
+    bybit_total = bybit_balance.get('usdt_free', 0) + bybit_balance.get('sol_value_usd', 0)
+
+    print(f"[총 가용자산] Binance: ${binance_total:.2f} | Bybit: ${bybit_total:.2f}")
+
     for config in BOT_CONFIGS:
         exchange_id = config.get('exchange_id', '')
         original_capital = config.get('capital', 0)
-        
-        if exchange_id == 'binance' and binance_available < original_capital:
-            # Binance 봇들은 잔액 비례로 분배
+
+        if exchange_id == 'binance' and binance_total < original_capital * 0.5:
+            # 총 자산이 설정 자본의 50% 미만일 때만 조정
             old_capital = config['capital']
-            config['capital'] = max(0.5, binance_available * 0.3)  # 최소 $0.5 또는 30%
+            config['capital'] = max(1.0, binance_total * 0.3)
             print(f"[자본 조정] {config['id']}: ${old_capital:.2f} → ${config['capital']:.2f}")
-            
-        elif exchange_id == 'bybit' and bybit_available < original_capital:
-            # Bybit 봇들은 잔액 비례로 분배
+
+        elif exchange_id == 'bybit' and bybit_total < original_capital * 0.5:
             old_capital = config['capital']
-            config['capital'] = max(0.5, bybit_available * 0.3)
+            config['capital'] = max(1.0, bybit_total * 0.3)
             print(f"[자본 조정] {config['id']}: ${old_capital:.2f} → ${config['capital']:.2f}")
     
     print("="*60 + "\n")

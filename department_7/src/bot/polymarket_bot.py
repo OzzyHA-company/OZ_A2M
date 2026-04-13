@@ -30,9 +30,10 @@ sys.path.insert(0, str(project_root))
 from lib.core.logger import get_logger
 from lib.messaging.mqtt_client import MQTTClient, MQTTConfig
 from lib.messaging.event_bus import EventBus, get_event_bus
-from occore.control_tower.llm_analyzer import LLMAnalyzer
-from occore.control_tower.alert_manager import AlertManager
-from occore.verification.signal_generator import SignalGenerator
+# occore 제거 — Gemini 직접 호출로 대체
+LLMAnalyzer = None
+AlertManager = None
+SignalGenerator = None
 
 logger = get_logger(__name__)
 
@@ -120,9 +121,11 @@ class PolymarketAIBot:
         self.trades: List[PolymarketTrade] = []
 
         # AI 컴포넌트
-        self.alert_manager = AlertManager()
-        self.llm_analyzer = LLMAnalyzer(alert_manager=self.alert_manager)
-        self.signal_generator = SignalGenerator()
+        self._gemini_api_key = (
+            os.environ.get("GEMINI_API_KEY_PAID_1")
+            or os.environ.get("GEMINI_API_KEY")
+            or os.environ.get("GEMINI_API_KEY_FREE_1")
+        )
 
         # MQTT
         mqtt_config = MQTTConfig(host=mqtt_host, port=mqtt_port, client_id=bot_id)
@@ -312,15 +315,38 @@ class PolymarketAIBot:
             raise
 
     async def _fetch_active_markets(self) -> List[Dict]:
-        """활성 예측 시장 조회"""
+        """Polymarket CLOB API에서 활성 시장 조회"""
         if self.mock_mode:
             return self._mock_markets
 
         try:
-            # TODO: Polymarket API에서 활성 시장 조회
-            return []
+            import httpx
+            async with httpx.AsyncClient(timeout=15) as client:
+                resp = await client.get(
+                    "https://clob.polymarket.com/markets",
+                    params={"active": "true", "closed": "false", "limit": 20}
+                )
+                data = resp.json()
+                markets_raw = data if isinstance(data, list) else data.get("data", [])
+
+            markets = []
+            for m in markets_raw:
+                tokens = m.get("tokens", [])
+                yes_token = next((t for t in tokens if t.get("outcome", "").lower() == "yes"), None)
+                yes_price = float(yes_token.get("price", 0.5)) if yes_token else 0.5
+                markets.append({
+                    "id": m.get("condition_id", m.get("id", "")),
+                    "question": m.get("question", ""),
+                    "yes_price": yes_price,
+                    "volume": float(m.get("volume", 0)),
+                    "end_date": m.get("end_date_iso", ""),
+                })
+
+            logger.info(f"Polymarket 시장 {len(markets)}개 조회 완료")
+            return markets
+
         except Exception as e:
-            logger.error(f"Failed to fetch markets: {e}")
+            logger.error(f"시장 조회 실패: {e}")
             return []
 
     async def _analyze_market(self, market: Dict) -> Optional[MarketOpportunity]:
@@ -331,15 +357,10 @@ class PolymarketAIBot:
             market_yes_price = market.get("yes_price", 0.5)
             market_prob = market_yes_price
 
-            # AI 분석
-            analysis = await self.llm_analyzer.analyze({
-                "type": "prediction_market",
-                "question": question,
-                "market_probability": market_prob,
-                "context": "Polymarket prediction market"
-            })
-
-            ai_prob = analysis.get("probability", market_prob)
+            # Gemini로 AI 확률 판단
+            ai_prob = await self._gemini_predict(question, market_prob)
+            if ai_prob is None:
+                ai_prob = market_prob
 
             # 괴리 계산
             edge = ai_prob - market_prob
@@ -371,21 +392,36 @@ class PolymarketAIBot:
             logger.error(f"Failed to analyze market: {e}")
             return None
 
-    async def _validate_opportunity(self, opportunity: MarketOpportunity) -> Optional[Dict]:
-        """Signal Generator를 통한 검증"""
+    async def _gemini_predict(self, question: str, market_prob: float) -> Optional[float]:
+        """OZ_Central LLM Gateway로 예측 확률 판단"""
         try:
-            signal = await self.signal_generator.generate_signal({
-                "type": "polymarket_opportunity",
-                "market_id": opportunity.market_id,
-                "question": opportunity.question,
-                "edge": opportunity.edge,
-                "ai_probability": opportunity.ai_probability,
-                "market_probability": opportunity.market_probability
-            })
-            return signal
+            import httpx, json as _json, re as _re
+            prompt = (
+                f"Polymarket 예측 시장 질문: \"{question}\"\n"
+                f"현재 시장 YES 확률: {market_prob:.1%}\n"
+                f"실제 YES 확률을 0.0~1.0으로 판단해. "
+                f"JSON으로만 답해: {{\"probability\": 0.0~1.0, \"reason\": \"한줄\"}}"
+            )
+            oz_central = os.environ.get("OZ_CENTRAL_URL", "http://localhost:8000")
+            async with httpx.AsyncClient(timeout=20) as client:
+                resp = await client.post(
+                    f"{oz_central}/llm/chat",
+                    json={"message": prompt, "department": "polymarket"}
+                )
+                text = resp.json().get("content", "")
+            m = _re.search(r'\{[^}]+\}', text, _re.DOTALL)
+            if m:
+                d = _json.loads(m.group())
+                return float(d.get("probability", market_prob))
         except Exception as e:
-            logger.error(f"Failed to validate opportunity: {e}")
-            return None
+            logger.warning(f"LLM 예측 실패: {e}")
+        return None
+
+    async def _validate_opportunity(self, opportunity: MarketOpportunity) -> Optional[Dict]:
+        """edge가 충분하면 유효"""
+        if abs(opportunity.edge) >= self.min_edge:
+            return {"valid": True, "edge": opportunity.edge}
+        return None
 
     async def _place_bet(self, opportunity: MarketOpportunity):
         """베팅 실행"""

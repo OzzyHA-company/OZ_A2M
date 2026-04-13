@@ -302,7 +302,7 @@ def generate_watchdog_config():
         "monitoring": {
             "redis_enabled": True,
             "redis_host": "localhost",
-            "redis_port": 6379,
+            "redis_port": 6380,
             "mqtt_enabled": True,
             "mqtt_host": "localhost",
             "mqtt_port": 1883,

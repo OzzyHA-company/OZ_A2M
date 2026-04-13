@@ -241,6 +241,56 @@ class BybitScalpingBot:
         # 마켓 로드
         await self.exchange.load_markets()
 
+        # Bybit SOL/USDT 최소 주문금액
+        BYBIT_MIN_ORDER_USD = 1.0
+
+        # 동적 자본 조회: 실제 잔액으로 자본 조정
+        try:
+            balance = await self.exchange.fetch_balance()
+            available = float(balance.get("USDT", {}).get("free", 0))
+
+            # SOL 가치 포함 총액 계산
+            sol_free = float(balance.get("SOL", {}).get("free", 0))
+            try:
+                ticker = await self.exchange.fetch_ticker("SOL/USDT")
+                sol_usd = sol_free * ticker.get("last", 0)
+            except Exception:
+                sol_usd = 0.0
+            total_available = available + sol_usd
+
+            if total_available < BYBIT_MIN_ORDER_USD:
+                logger.warning(
+                    f"[자본 부족] 총 가용 ${total_available:.2f} < 최소주문 ${BYBIT_MIN_ORDER_USD} "
+                    f"— IDLE 대기 (봇 종료 안 함)"
+                )
+                self.state = BotState.IDLE
+                # 잔액 충족될 때까지 대기, 5분마다 재확인
+                while True:
+                    await asyncio.sleep(300)
+                    try:
+                        b2 = await self.exchange.fetch_balance()
+                        avail2 = float(b2.get("USDT", {}).get("free", 0))
+                        if avail2 >= BYBIT_MIN_ORDER_USD:
+                            logger.info(f"[자본 회복] ${avail2:.2f} 확인 — 재개")
+                            available = avail2
+                            break
+                        logger.info(f"[자본 대기 중] ${avail2:.2f}")
+                    except Exception:
+                        pass
+            if available > 0 and available < self.capital:
+                logger.warning(
+                    f"[자본 조정] 설정 ${self.capital:.2f} → 실제 ${available * 0.95:.2f} "
+                    f"(available: ${available:.2f})"
+                )
+                self.capital = available * 0.95
+                self.initial_capital = self.capital
+                self.balance = self.capital
+                self.max_daily_loss = self.capital * 0.2
+            elif available >= self.capital:
+                logger.info(f"[자본 확인] 설정 ${self.capital:.2f} / 가용 ${available:.2f} ✓")
+        except Exception as e:
+            logger.warning(f"[잔액 조회 실패] 설정값 사용: ${self.capital:.2f} ({e})")
+
         # EventBus 초기화
         if enable_event_bus:
             try:
@@ -342,6 +392,13 @@ class BybitScalpingBot:
                     await asyncio.sleep(30)
                     continue
                 except ccxt.ExchangeError as e:
+                    err_str = str(e)
+                    # 잔고 부족 / 최소 주문금액 미달 → 종료 아닌 대기
+                    if any(k in err_str for k in ["Order value exceeded", "lower limit", "insufficient", "balance"]):
+                        logger.warning(f"[자본 부족 대기] {e} — 5분 후 재시도")
+                        self.state = BotState.IDLE
+                        await asyncio.sleep(300)
+                        continue
                     logger.error(f"Exchange error in bot loop: {e}")
                     self.state = BotState.ERROR
                     await self._safe_stop()
@@ -491,8 +548,11 @@ class BybitScalpingBot:
             amount = self.max_position_size
 
         try:
-            order = self.exchange.create_market_buy_order(self.symbol, amount)
-            price = order["price"] or order["average"]
+            order = await self.exchange.create_market_buy_order(self.symbol, amount)
+            price = order.get("price") or order.get("average") or order.get("cost")
+            if not price:
+                ticker = await self.exchange.fetch_ticker(self.symbol)
+                price = ticker.get("last") or ticker.get("close") or ticker.get("bid") or 0
 
             self.position = Position(
                 symbol=self.symbol,
@@ -557,13 +617,13 @@ class BybitScalpingBot:
 
         try:
             if self.position.side == PositionSide.LONG:
-                order = self.exchange.create_market_sell_order(
+                order = await self.exchange.create_market_sell_order(
                     self.symbol,
                     self.position.amount
                 )
 
-                exit_price = order["price"] or order["average"]
-                pnl = (exit_price - self.position.entry_price) * self.position.amount
+                exit_price = order.get("price") or order.get("average") or order.get("cost") or self.position.entry_price or 0
+                pnl = (exit_price - (self.position.entry_price or 0)) * self.position.amount
 
                 trade_time = datetime.utcnow()
                 trade = Trade(
@@ -584,6 +644,10 @@ class BybitScalpingBot:
                 if pnl > 0:
                     self.winning_trades += 1
                 self.daily_pnl += pnl
+
+                # 수익 발생 시 vault_manager로 인출
+                if pnl > 0:
+                    await self._withdraw_profit(pnl)
 
                 logger.info(f"Closed LONG position: {self.position.amount} {self.symbol} @ {exit_price}, PnL: {pnl:.4f}")
 
@@ -623,7 +687,7 @@ class BybitScalpingBot:
             return
 
         try:
-            ticker = self.exchange.fetch_ticker(self.symbol)
+            ticker = await self.exchange.fetch_ticker(self.symbol)
             current_price = ticker["last"]
 
             if self.position.side == PositionSide.LONG:
@@ -741,6 +805,18 @@ class BybitScalpingBot:
                         logger.warning(f"Telegram notification failed: {resp.status}")
         except Exception as e:
             logger.error(f"Failed to send Telegram notification: {e}")
+
+    async def _withdraw_profit(self, profit: float):
+        """수익을 마스터 금고로 이전"""
+        if profit < 1.0:
+            return  # $1 미만은 누적
+        try:
+            from lib.core.profit.vault_manager import MasterVaultManager
+            vault = MasterVaultManager()
+            record = await vault.withdraw_profit_to_vault(self.bot_id, profit)
+            logger.info(f"[VaultManager] {self.bot_id}: ${profit:.4f} → {record.vault_type.value} ({record.status})")
+        except Exception as e:
+            logger.warning(f"[VaultManager] 수익 이전 실패 (기록만 유지): {e}")
 
     async def _send_daily_pnl_notification(self):
         """일일 PnL 알림 발송"""

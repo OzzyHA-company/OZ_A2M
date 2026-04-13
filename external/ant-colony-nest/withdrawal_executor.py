@@ -469,7 +469,7 @@ class PIMonoWithdrawalOptimizer:
 # 편의 함수
 async def create_withdrawal_executor(
     redis_host: str = "localhost",
-    redis_port: int = 6379
+    redis_port: int = 6380
 ) -> WithdrawalExecutor:
     """WithdrawalExecutor 팩토리"""
     from nest_profit import create_profit_tracker

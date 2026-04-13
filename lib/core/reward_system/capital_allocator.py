@@ -85,12 +85,11 @@ class CapitalAllocator:
     """
 
     # 재배분 규칙
+    # ⚠️ 매일 장 마감: 수익은 마스터 금고로, 봇에는 원금만 남김
+    # 순위/등급에 따른 자본 증감 없음
     REALLOCATION_RULES = {
-        'top_20_pct_bonus': 0.20,      # 상위 20%: +20%
-        'bottom_20_pct_penalty': -0.50, # 하위 20%: -50%
-        'min_capital_threshold': 5.0,   # 최소 자본 $5
-        'max_capital_multiplier': 2.0,  # 최대 기준자본의 2배
-        'reallocation_interval_hours': 24,  # 재배분 주기
+        'max_capital_multiplier': 1.0,      # 원금 초과 불가
+        'reallocation_interval_hours': 24,  # 매일 1회
     }
 
     def __init__(
@@ -129,109 +128,23 @@ class CapitalAllocator:
         reward_results: Dict[str, RewardResult],
     ) -> Dict[str, Dict[str, Any]]:
         """
-        자본 재배분 계산
+        일일 정산: 수익은 금고로, 모든 봇은 원금으로 리셋
 
-        Args:
-            reward_results: {bot_id: RewardResult} 보상 결과
-
-        Returns:
-            {bot_id: reallocation_plan} 재배분 계획
+        순위/등급에 따른 자본 증감 없음.
+        성과가 좋든 나쁘든 원금만 유지.
         """
-        if not reward_results:
-            return {}
-
-        # 점수 기준 정렬
-        ranked = sorted(
-            [(bot_id, result.score) for bot_id, result in reward_results.items()],
-            key=lambda x: x[1],
-            reverse=True
-        )
-
-        n_bots = len(ranked)
-        top_20_count = max(1, int(n_bots * 0.2))
-        bottom_20_count = max(1, int(n_bots * 0.2))
-
-        top_bots = set([r[0] for r in ranked[:top_20_count]])
-        bottom_bots = set([r[0] for r in ranked[-bottom_20_count:]])
-
-        # 회수될 자본 계산
-        reclaimed_capital = 0.0
         plans = {}
 
-        # 1단계: 하위 봇에서 자본 회수
-        for bot_id in bottom_bots:
-            if bot_id not in self.allocations:
-                continue
-
-            alloc = self.allocations[bot_id]
-            reduction = alloc.current_capital * abs(self.REALLOCATION_RULES['bottom_20_pct_penalty'])
-            reclaimed_capital += reduction
+        for bot_id, alloc in self.allocations.items():
+            profit = alloc.current_capital - alloc.base_capital
 
             plans[bot_id] = {
-                'action': 'reduce',
+                'action': 'reset_to_base',
                 'current': alloc.current_capital,
-                'proposed': alloc.current_capital - reduction,
-                'change': -reduction,
-                'reason': 'bottom_20_performance',
-                'rank': ranked.index((bot_id, reward_results[bot_id].score)) + 1,
-            }
-
-        # 2단계: 상위 봇에 자본 추가 배분
-        bonus_per_bot = reclaimed_capital / len(top_bots) if top_bots else 0
-
-        for bot_id in top_bots:
-            if bot_id not in self.allocations:
-                continue
-
-            alloc = self.allocations[bot_id]
-
-            # 기본 볼너스 + 등급 별 추가 볼너스
-            grade_bonus = 0
-            if self.rpg_system:
-                state = self.rpg_system.get_or_create_state(bot_id)
-                grade_multipliers = {
-                    BotGrade.BRONZE: 0.0,
-                    BotGrade.SILVER: 0.05,
-                    BotGrade.GOLD: 0.10,
-                    BotGrade.PLATINUM: 0.15,
-                    BotGrade.DIAMOND: 0.20,
-                    BotGrade.LEGEND: 0.30,
-                }
-                grade_bonus = alloc.current_capital * grade_multipliers.get(state.grade, 0)
-
-            total_bonus = bonus_per_bot + grade_bonus
-
-            # 최대 자본 한도 체크
-            max_capital = alloc.base_capital * self.REALLOCATION_RULES['max_capital_multiplier']
-            proposed = min(alloc.current_capital + total_bonus, max_capital)
-
-            plans[bot_id] = {
-                'action': 'increase',
-                'current': alloc.current_capital,
-                'proposed': proposed,
-                'change': proposed - alloc.current_capital,
-                'reason': 'top_20_performance',
-                'rank': ranked.index((bot_id, reward_results[bot_id].score)) + 1,
-                'bonus_breakdown': {
-                    'ensemble_share': bonus_per_bot,
-                    'grade_bonus': grade_bonus,
-                }
-            }
-
-        # 3단계: 중위 봇은 유지
-        middle_bots = set(self.allocations.keys()) - top_bots - bottom_bots
-        for bot_id in middle_bots:
-            if bot_id not in self.allocations:
-                continue
-
-            rank = next((i+1 for i, (bid, _) in enumerate(ranked) if bid == bot_id), n_bots // 2)
-            plans[bot_id] = {
-                'action': 'maintain',
-                'current': self.allocations[bot_id].current_capital,
-                'proposed': self.allocations[bot_id].current_capital,
-                'change': 0,
-                'reason': 'mid_performance',
-                'rank': rank,
+                'proposed': alloc.base_capital,   # 원금으로 리셋
+                'profit_to_vault': max(0.0, profit),  # 수익분 → 금고
+                'change': alloc.base_capital - alloc.current_capital,
+                'reason': 'daily_profit_to_vault',
             }
 
         return plans
@@ -266,91 +179,74 @@ class CapitalAllocator:
             }
         }
 
+        total_to_vault = 0.0
+
         for bot_id, plan in plans.items():
             if bot_id not in self.allocations:
                 continue
 
+            profit_to_vault = plan.get('profit_to_vault', 0.0)
+            total_to_vault += profit_to_vault
+
             if not dry_run:
-                record = self.allocations[bot_id].adjust_capital(
-                    plan['proposed'],
-                    plan['reason']
-                )
+                self.allocations[bot_id].adjust_capital(plan['proposed'], plan['reason'])
 
             results['changes'].append({
                 'bot_id': bot_id,
                 'action': plan['action'],
-                'amount': plan['change'],
                 'from': plan['current'],
                 'to': plan['proposed'],
-                'reason': plan['reason'],
+                'profit_to_vault': profit_to_vault,
             })
+            results['summary']['maintained'] += 1
 
-            if plan['action'] == 'increase':
-                results['summary']['increased'] += 1
-                results['summary']['total_redistributed'] += plan['change']
-            elif plan['action'] == 'reduce':
-                results['summary']['decreased'] += 1
-            else:
-                results['summary']['maintained'] += 1
-
+        results['summary']['total_to_vault'] = round(total_to_vault, 4)
         self.last_reallocation = datetime.utcnow()
-
-        self.logger.info(
-            f"Reallocation complete: +{results['summary']['increased']}, "
-            f"-{results['summary']['decreased']}, "
-            f"={results['summary']['maintained']}"
-        )
+        self.logger.info(f"Daily reset complete. 금고 입금: ${total_to_vault:.4f}")
 
         return results
 
-    def get_opportunity_bonus(
-        self,
-        bot_id: str,
-        opportunity_type: str,
-        volatility_spike: Optional[float] = None,
-        funding_extreme: Optional[float] = None,
-    ) -> float:
+    def ceo_invest(self, bot_id: str, amount: float, reason: str = "") -> Dict[str, Any]:
         """
-        기회 포착 보너스 (수익 극대화 핵심)
+        CEO 직접 추가 투자 — 수동 전용
+
+        성과 좋은 봇에 CEO가 판단해서 직접 자본 추가.
+        자동 호출 금지.
 
         Args:
-            bot_id: 봇 ID
-            opportunity_type: 'volatility', 'funding', 'launch', 'fear_greed'
-            volatility_spike: 변동성 지수 (ATR 기준)
-            funding_extreme: 펀딩비 극단값
-
-        Returns:
-            float: 보너스 자본액
+            bot_id: 투자할 봇 ID
+            amount: 추가 금액 ($)
+            reason: 투자 사유 (기록용)
         """
         if bot_id not in self.allocations:
-            return 0.0
+            raise ValueError(f"Bot {bot_id} not registered")
+        if amount <= 0:
+            raise ValueError("추가 투자금은 0보다 커야 합니다")
 
-        base_capital = self.allocations[bot_id].current_capital
-        bonus = 0.0
+        alloc = self.allocations[bot_id]
+        old_base = alloc.base_capital
+        old_current = alloc.current_capital
 
-        if opportunity_type == 'volatility' and volatility_spike:
-            # 변동성 급등 → Scalper/Sniper 보너스
-            if volatility_spike > 2.0:  # 2배 이상 변동성
-                bonus = base_capital * 0.15  # 15% 추가
-                self.logger.info(f"Volatility bonus for {bot_id}: ${bonus:.2f}")
+        # base_capital도 올림 (이제 이게 새 원금)
+        alloc.base_capital += amount
+        alloc.current_capital += amount
+        record = alloc.adjust_capital(alloc.current_capital, f"CEO투자: {reason}")
 
-        elif opportunity_type == 'funding' and funding_extreme:
-            # 펀딩비 극단값 → Funding Rate 보너스
-            if abs(funding_extreme) > 0.1:  # 0.1% 이상
-                bonus = base_capital * 0.20  # 20% 추가
-                self.logger.info(f"Funding extreme bonus for {bot_id}: ${bonus:.2f}")
+        self.logger.info(
+            f"[CEO투자] {bot_id}: 원금 ${old_base:.2f} → ${alloc.base_capital:.2f} "
+            f"(+${amount:.2f}) | 사유: {reason}"
+        )
 
-        elif opportunity_type == 'launch':
-            # 새 토큰 런칭 → Sniper 우선권
-            bonus = base_capital * 0.25  # 25% 추가
-            self.logger.info(f"Launch bonus for {bot_id}: ${bonus:.2f}")
-
-        elif opportunity_type == 'fear_greed':
-            # 극단 공포/탐욕 → 역추세 보너스
-            bonus = base_capital * 0.10  # 10% 추가
-            self.logger.info(f"Fear/Greed bonus for {bot_id}: ${bonus:.2f}")
-
-        return bonus
+        return {
+            'bot_id': bot_id,
+            'added': amount,
+            'old_base': old_base,
+            'new_base': alloc.base_capital,
+            'old_current': old_current,
+            'new_current': alloc.current_capital,
+            'reason': reason,
+            'timestamp': datetime.utcnow().isoformat(),
+        }
 
     def get_allocations_summary(self) -> Dict[str, Any]:
         """자본 배분 현황 요약"""

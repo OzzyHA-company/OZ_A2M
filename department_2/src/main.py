@@ -8,11 +8,16 @@ D1 관제탑에서 MQTT로 수신한 데이터를 검증하고
 import asyncio
 import json
 import logging
+import os
+import sys
 from typing import Dict, Any, Optional
 from datetime import datetime
 from decimal import Decimal
 
-from lib.messaging import get_mqtt_client, MQTTMessage
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
+
+from lib.messaging import get_mqtt_client
+from lib.messaging import BaseMessage as MQTTMessage
 from lib.core import get_logger
 from occore.verification import VerificationPipeline
 from occore.verification.models import (

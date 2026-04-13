@@ -664,7 +664,7 @@ class ProfitTracker:
 
 
 # 편의 함수
-async def create_profit_tracker(redis_host: str = "localhost", redis_port: int = 6379) -> ProfitTracker:
+async def create_profit_tracker(redis_host: str = "localhost", redis_port: int = 6380) -> ProfitTracker:
     """ProfitTracker 팩토리 함수"""
     redis_client = redis.Redis(host=redis_host, port=redis_port, decode_responses=True)
     return ProfitTracker(redis_client)

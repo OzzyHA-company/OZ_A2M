@@ -113,7 +113,7 @@ class DevOpsTeamService:
         # Redis
         self.health_checker.register_service(
             "redis",
-            "redis://localhost:6379",
+            "redis://localhost:6380",
             check_type="tcp"
         )
 

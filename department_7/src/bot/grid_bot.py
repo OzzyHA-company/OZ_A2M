@@ -118,6 +118,7 @@ class BinanceGridBot:
         self.grid_spacing_pct = grid_spacing_pct
         self.sandbox = sandbox
         self.telegram_alerts = telegram_alerts
+        self._last_telegram_time = None  # Telegram throttle
 
         # 상태
         self.status = GridStatus.IDLE
@@ -518,6 +519,12 @@ class BinanceGridBot:
         """매수 주문 배치"""
         try:
             grid = self.grid_levels[level]
+
+            # 이미 주문 있으면 중복 배치 안 함
+            if grid.buy_order_id:
+                logger.debug(f"Buy order already exists at level {level}: {grid.buy_order_id}, skipping")
+                return
+
             amount = self._calculate_order_amount(grid.price)
 
             # 주문 유효성 검사
@@ -651,6 +658,10 @@ class BinanceGridBot:
         self.grid_profit += grid_profit
         self.total_pnl += grid_profit
 
+        # 수익 vault_manager로 이전
+        if grid_profit > 0:
+            await self._withdraw_profit(grid_profit)
+
         # 거래 기록
         trade = GridTrade(
             id=f"grid_sell_{datetime.utcnow().timestamp()}",
@@ -750,6 +761,18 @@ class BinanceGridBot:
 
         logger.info(f"Grids rebalanced around ${new_price:.2f}")
 
+    async def _withdraw_profit(self, profit: float):
+        """수익을 마스터 금고로 이전"""
+        if profit < 1.0:
+            return
+        try:
+            from lib.core.profit.vault_manager import MasterVaultManager
+            vault = MasterVaultManager()
+            record = await vault.withdraw_profit_to_vault(self.bot_id, profit)
+            logger.info(f"[VaultManager] {self.bot_id}: ${profit:.4f} → {record.vault_type.value} ({record.status})")
+        except Exception as e:
+            logger.warning(f"[VaultManager] 수익 이전 실패 (기록만 유지): {e}")
+
     async def stop(self):
         """봇 중지"""
         self.status = GridStatus.IDLE
@@ -777,9 +800,15 @@ class BinanceGridBot:
         logger.info(f"Grid bot {self.bot_id} stopped")
 
     async def _send_telegram_notification(self, message: str):
-        """Telegram 알림 발송"""
+        """Telegram 알림 발송 (5초 throttle)"""
         if not self.telegram_alerts or not self.telegram_bot_token or not self.telegram_chat_id:
             return
+
+        from datetime import datetime
+        now = datetime.utcnow()
+        if self._last_telegram_time:
+            if (now - self._last_telegram_time).total_seconds() < 5.0:
+                return
 
         try:
             import aiohttp
@@ -791,7 +820,9 @@ class BinanceGridBot:
             }
             async with aiohttp.ClientSession() as session:
                 async with session.post(url, json=payload) as resp:
-                    if resp.status != 200:
+                    if resp.status == 200:
+                        self._last_telegram_time = now
+                    else:
                         logger.warning(f"Telegram notification failed: {resp.status}")
         except Exception as e:
             logger.error(f"Failed to send Telegram notification: {e}")

@@ -27,7 +27,7 @@ class RedisCache:
     def __init__(
         self,
         host: str = "localhost",
-        port: int = 6379,
+        port: int = 6380,
         db: int = 0,
         password: Optional[str] = None,
         socket_timeout: float = 5.0
@@ -480,7 +480,7 @@ _redis_cache_instance: Optional[RedisCache] = None
 
 def get_redis_cache(
     host: str = "localhost",
-    port: int = 6379,
+    port: int = 6380,
     db: int = 0
 ) -> RedisCache:
     """전역 RedisCache 인스턴스 가져오기"""

@@ -18,7 +18,7 @@ async def _get_cache():
     """Redis 캐시 인스턴스 가져오기 (지연 초기화)"""
     global _redis_cache
     if _redis_cache is None:
-        _redis_cache = get_redis_cache(host="localhost", port=6379, db=0)
+        _redis_cache = get_redis_cache(host="localhost", port=6380, db=0)
         await _redis_cache.connect()
     return _redis_cache
 

@@ -29,9 +29,9 @@ class RedisClient:
             if self._cluster_mode:
                 # 클러스터 모드
                 startup_nodes = getattr(self._settings, 'redis_cluster_nodes', [
-                    {"host": "localhost", "port": "6379"},
                     {"host": "localhost", "port": "6380"},
                     {"host": "localhost", "port": "6381"},
+                    {"host": "localhost", "port": "6382"},
                 ])
 
                 self._client = RedisCluster(

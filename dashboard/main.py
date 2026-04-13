@@ -62,7 +62,7 @@ system_state = {
 
 # Infrastructure status
 infra_status = {
-    "redis": {"status": "active", "port": 6379},
+    "redis": {"status": "active", "port": 6380},
     "kafka": {"status": "active", "port": 9092},
     "mqtt": {"status": "active", "port": 1883},
     "api_gateway": {"status": "active", "port": 8000},
@@ -119,7 +119,7 @@ async def redis_listener():
     while True:
         try:
             if redis_client is None:
-                redis_client = redis.Redis(host='localhost', port=6379, decode_responses=True)
+                redis_client = redis.Redis(host='localhost', port=6380, decode_responses=True)
 
             # Subscribe to channels
             pubsub = redis_client.pubsub()

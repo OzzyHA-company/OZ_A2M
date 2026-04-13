@@ -1,0 +1,13 @@
+{
+  "timestamp": "2026-04-13T11:39:27.153258",
+  "history": [
+    {
+      "bot_id": "grid_binance_001",
+      "timestamp": "2026-04-13T11:39:25.339211",
+      "profit": 1.5,
+      "withdrawn": 1.5,
+      "vault": "binance_profit",
+      "status": "completed"
+    }
+  ]
+}

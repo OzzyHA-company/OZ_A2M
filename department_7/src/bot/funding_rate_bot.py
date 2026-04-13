@@ -167,10 +167,27 @@ class FundingRateBot:
         self.status = FundingStatus.RUNNING
         logger.info("Funding bot initialized")
 
+        # 동적 자본 조회: 실제 잔액으로 자본 조정
+        try:
+            primary = self.exchanges.get("binance") or next(iter(self.exchanges.values()), None)
+            if primary:
+                balance = await primary.fetch_balance()
+                available = float(balance.get("USDT", {}).get("free", 0))
+                if available > 0 and available < self.capital:
+                    logger.warning(
+                        f"[자본 조정] 설정 ${self.capital:.2f} → 실제 ${available * 0.95:.2f} "
+                        f"(available: ${available:.2f})"
+                    )
+                    self.capital = available * 0.95
+                else:
+                    logger.info(f"[자본 확인] 설정 ${self.capital:.2f} / 가용 ${available:.2f} ✓")
+        except Exception as e:
+            logger.warning(f"[잔액 조회 실패] 설정값 사용: ${self.capital:.2f} ({e})")
+
         # 시작 알림
         await self._send_telegram_notification(
             f"💰 Funding Rate 봇 시작\n"
-            f"자본: ${self.capital}\n"
+            f"자본: ${self.capital:.2f}\n"
             f"최소 펀딩: {self.min_funding_rate * 100}%\n"
             f"수취 주기: {self.funding_interval_hours}시간"
         )
@@ -256,7 +273,7 @@ class FundingRateBot:
         key = f"{exchange_id}:{symbol}"
         if key in self.market_info:
             limits = self.market_info[key].get("limits", {})
-            return limits.get("cost", {}).get("min", self.MIN_NOTIONAL_USDT)
+            return limits.get("cost", {}).get("min") or self.MIN_NOTIONAL_USDT
         return self.MIN_NOTIONAL_USDT
 
     async def run(self):
@@ -536,6 +553,10 @@ class FundingRateBot:
                 f"Exited position: {symbol}, trade PnL: ${trade_pnl:.4f}"
             )
 
+            # 수익 발생 시 vault_manager로 이전
+            if trade_pnl > 0:
+                await self._withdraw_profit(trade_pnl)
+
             # Telegram 알림
             emoji = "🟢" if trade_pnl > 0 else "🔴"
             await self._send_telegram_notification(
@@ -548,6 +569,18 @@ class FundingRateBot:
 
         except Exception as e:
             logger.error(f"Failed to exit position: {e}")
+
+    async def _withdraw_profit(self, profit: float):
+        """수익을 마스터 금고로 이전"""
+        if profit < 1.0:
+            return  # $1 미만은 누적
+        try:
+            from lib.core.profit.vault_manager import MasterVaultManager
+            vault = MasterVaultManager()
+            record = await vault.withdraw_profit_to_vault(self.bot_id, profit)
+            logger.info(f"[VaultManager] {self.bot_id}: ${profit:.4f} → {record.vault_type.value} ({record.status})")
+        except Exception as e:
+            logger.warning(f"[VaultManager] 수익 이전 실패 (기록만 유지): {e}")
 
     async def stop(self):
         """봇 중지"""
